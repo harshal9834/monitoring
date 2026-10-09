@@ -1,0 +1,6 @@
+{
+  "name": "KAVACH-AI: Training Centre Compliance & Monitoring Platform",
+  "description": "Production-grade AI-powered compliance and video analytics platform for monitoring government-funded skill training centres, attendance discrepancy detection, infrastructure verification, and automated action lifecycle management.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
