@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 1
+names: ['person']
+
+roboflow:
+  workspace: classroom-hql9v
+  project: classroom-people-number
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/classroom-hql9v/classroom-people-number/dataset/1

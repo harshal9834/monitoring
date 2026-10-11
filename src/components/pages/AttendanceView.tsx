@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Users,
   Plus,
@@ -10,12 +10,18 @@ import {
   Calendar,
   Eye,
   FileCheck,
+  Loader2,
 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 
 export const AttendanceView: React.FC = () => {
+  const currentUser = appState.currentUser;
+  const isCentreRole = currentUser.role === 'CENTRE_ADMIN';
+  const assignedCentreId = currentUser.assignedCentres?.[0] || 'tc_001';
+
   const [showSubmitModal, setShowSubmitModal] = useState(false);
-  const [selectedCentreId, setSelectedCentreId] = useState('tc_001');
+  const [selectedCentreId, setSelectedCentreId] = useState(isCentreRole ? assignedCentreId : 'tc_001');
   const [date, setDate] = useState('2026-10-09');
   const [batchCode, setBatchCode] = useState('AI-102');
   const [courseName, setCourseName] = useState('Industrial Python & Embedded Automation');
@@ -26,25 +32,61 @@ export const AttendanceView: React.FC = () => {
 
   // AI Scan estimation input for demo simulation
   const [aiEstimatedCount, setAiEstimatedCount] = useState(33);
-
-  const attendanceRecords = appState.attendanceRecords;
-  const centres = appState.centres;
+  const [attendanceRecords, setAttendanceRecords] = useState<any[]>([]);
+  const [centres, setCentres] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const settings = appState.settings;
 
-  const handleSubmitAttendance = (e: React.FormEvent) => {
+  const fetchRecords = async () => {
+    try {
+      setLoading(true);
+      const [attData, centreData] = await Promise.all([
+        isCentreRole ? api.getCentreAttendance().catch(() => []) : api.getAttendance().catch(() => []),
+        api.getCentres().catch(() => []),
+      ]);
+      setAttendanceRecords(Array.isArray(attData) ? attData : []);
+      if (Array.isArray(centreData)) {
+        setCentres(isCentreRole ? centreData.filter((c: any) => c.id === assignedCentreId) : centreData);
+      } else {
+        setCentres([]);
+      }
+    } catch (err) {
+      console.error('Failed to load attendance from MySQL:', err);
+      setAttendanceRecords([]);
+      setCentres([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRecords();
+  }, [isCentreRole]);
+
+  const handleSubmitAttendance = async (e: React.FormEvent) => {
     e.preventDefault();
-    appState.submitAttendance({
-      centreId: selectedCentreId,
-      date,
-      batchCode,
-      courseName,
-      reportedTrainees: Number(reportedCount),
-      sessionStartTime,
-      sessionEndTime,
-      instructorName,
-      aiEstimatedCount: Number(aiEstimatedCount),
-    });
-    setShowSubmitModal(false);
+    setIsSubmitting(true);
+    try {
+      await api.submitAttendance({
+        centre_id: selectedCentreId,
+        batch_code: batchCode,
+        course_name: courseName,
+        date,
+        session_start: sessionStartTime,
+        session_end: sessionEndTime,
+        instructor_name: instructorName,
+        reported_trainees: Number(reportedCount),
+        ai_estimated_count: Number(aiEstimatedCount),
+      });
+      await fetchRecords();
+      setShowSubmitModal(false);
+    } catch (err: any) {
+      console.error('Failed to submit attendance to MySQL:', err);
+      alert(err.message || 'Failed to submit attendance to MySQL');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -128,8 +170,9 @@ export const AttendanceView: React.FC = () => {
                 <th className="py-3 px-4">Date & Time</th>
                 <th className="py-3 px-4">Centre & Code</th>
                 <th className="py-3 px-4">Batch & Course</th>
-                <th className="py-3 px-4">Instructor</th>
-                <th className="py-3 px-4">Reported Trainees</th>
+                <th className="py-3 px-4">Trainer</th>
+                <th className="py-3 px-4">Reported Attendance</th>
+                <th className="py-3 px-4">Video Evidence</th>
                 <th className="py-3 px-4">AI Vision Headcount</th>
                 <th className="py-3 px-4">Variance</th>
                 <th className="py-3 px-4">Audit Status</th>
@@ -150,19 +193,37 @@ export const AttendanceView: React.FC = () => {
                       </div>
                     </td>
                     <td className="py-3.5 px-4">
-                      <span className="font-bold text-slate-900 block">{centre?.name || 'Centre'}</span>
-                      <span className="text-[10px] font-mono text-slate-500">{centre?.code}</span>
+                      <span className="font-bold text-slate-900 block">{centre?.name || rec.centreName || 'Centre'}</span>
+                      <span className="text-[10px] font-mono text-slate-500">{centre?.code || rec.centreCode}</span>
                     </td>
                     <td className="py-3.5 px-4">
                       <span className="font-bold text-indigo-700 block">{rec.batchCode}</span>
                       <span className="text-[11px] text-slate-600">{rec.courseName}</span>
                     </td>
                     <td className="py-3.5 px-4 text-slate-700">{rec.instructorName}</td>
-                    <td className="py-3.5 px-4 font-bold text-slate-900">
-                      {rec.reportedTrainees} Trainees
+                    <td className="py-3.5 px-4">
+                      <span className="font-bold text-slate-900 block">
+                        {rec.reportedTrainees} Present
+                      </span>
+                      {rec.totalRegistered && (
+                        <span className="text-[10px] text-slate-400">
+                          of {rec.totalRegistered} Reg. {rec.totalAbsent ? `(${rec.totalAbsent} absent)` : ''}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3.5 px-4">
+                      {rec.hasVideo ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          Uploaded
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">None</span>
+                      )}
                     </td>
                     <td className="py-3.5 px-4 font-bold text-indigo-700">
-                      {rec.aiEstimatedCount !== undefined ? `${rec.aiEstimatedCount} Trainees` : 'Pending'}
+                      {rec.aiEstimatedCount !== null && rec.aiEstimatedCount !== undefined
+                        ? `${rec.aiEstimatedCount} Trainees`
+                        : 'Pending'}
                     </td>
                     <td className="py-3.5 px-4">
                       <span
@@ -183,7 +244,7 @@ export const AttendanceView: React.FC = () => {
                             : 'bg-emerald-100 text-emerald-800'
                         }`}
                       >
-                        {rec.status.replace('_', ' ')}
+                        {rec.status ? rec.status.replace('_', ' ') : 'SUBMITTED'}
                       </span>
                     </td>
                   </tr>
@@ -208,20 +269,26 @@ export const AttendanceView: React.FC = () => {
             </div>
 
             <form onSubmit={handleSubmitAttendance} className="space-y-3.5 text-xs">
-              <div>
-                <label className="font-semibold text-slate-700 block mb-1">Training Centre:</label>
-                <select
-                  value={selectedCentreId}
-                  onChange={(e) => setSelectedCentreId(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2"
-                >
-                  {centres.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.code})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isCentreRole ? (
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Training Centre:</label>
+                  <select
+                    value={selectedCentreId}
+                    onChange={(e) => setSelectedCentreId(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg p-2"
+                  >
+                    {centres.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-slate-100 rounded-lg text-xs font-semibold text-slate-700">
+                  Submitting for Authorized Centre: <span className="font-bold text-indigo-700">{centres[0]?.name || 'My Centre'} ({centres[0]?.code})</span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

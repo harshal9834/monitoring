@@ -18,30 +18,84 @@ import { appState } from '../../services/storage';
 import { StatCard } from '../common/StatCard';
 import { NavTab } from '../common/Sidebar';
 
+import { api } from '../../services/api';
+
 interface DashboardViewProps {
   onNavigate: (tab: NavTab, centreId?: string) => void;
   onOpenAlertDetail?: (alertId: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
-  const centres = appState.centres;
-  const alerts = appState.alerts;
-  const actions = appState.actions;
-  const attendance = appState.attendanceRecords;
+  const [summaryData, setSummaryData] = React.useState<any>(null);
+  const [centres, setCentres] = React.useState<any[]>([]);
+  const [alerts, setAlerts] = React.useState<any[]>([]);
+  const [actions, setActions] = React.useState<any[]>([]);
+  const [attendance, setAttendance] = React.useState<any[]>([]);
+  const [isLoading, setIsLoading] = React.useState<boolean>(true);
+
   const currentUser = appState.currentUser;
 
-  const criticalAlerts = alerts.filter((a) => a.severity === 'CRITICAL' && a.status !== 'RESOLVED');
-  const activeAlerts = alerts.filter((a) => a.status === 'NEW' || a.status === 'ACTION_CREATED');
-  const pendingActions = actions.filter((a) => a.status !== 'RESOLVED');
-  const overdueActions = actions.filter((a) => a.isOverdue || a.status === 'ESCALATED');
+  React.useEffect(() => {
+    let isMounted = true;
+    const fetchDashboardData = async (isInitial = false) => {
+      try {
+        if (isInitial) setIsLoading(true);
+        const [sumRes, centresRes, alertsRes, actionsRes, attRes] = await Promise.all([
+          api.getGovernmentSummary().catch(() => null),
+          api.getCentres().catch(() => []),
+          api.getAlerts().catch(() => []),
+          api.getActions().catch(() => []),
+          api.getAttendance().catch(() => []),
+        ]);
 
-  const avgCompliance = Math.round(
-    centres.reduce((acc, c) => acc + c.complianceScore, 0) / (centres.length || 1)
+        if (isMounted) {
+          if (sumRes) setSummaryData(sumRes);
+          setCentres(centresRes || []);
+          setAlerts(alertsRes || []);
+          setActions(actionsRes || []);
+          setAttendance(attRes || []);
+          if (isInitial) setIsLoading(false);
+        }
+      } catch (err) {
+        console.warn('Dashboard fetch error:', err);
+        if (isMounted && isInitial) setIsLoading(false);
+      }
+    };
+
+    fetchDashboardData(true);
+
+    // Controlled 30-second silent background refresh for live metrics (no page reload)
+    const interval = setInterval(() => {
+      fetchDashboardData(false);
+    }, 30000);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const criticalAlerts = alerts.filter(
+    (a) => (a.severity === 'CRITICAL' || a.severity === 'HIGH') && a.status !== 'RESOLVED'
   );
 
-  const centresRequiringInspection = centres.filter(
-    (c) => c.status === 'FLAGGED' || c.status === 'UNDER_REVIEW' || c.complianceScore < 80
-  );
+  const criticalAlertsCount = summaryData?.criticalAlerts ?? criticalAlerts.length;
+  const activeAlertsCount =
+    summaryData?.activeAlerts ??
+    alerts.filter((a) => a.status === 'NEW' || a.status === 'ACTION_CREATED').length;
+  const pendingActionsCount =
+    summaryData?.pendingActions ?? actions.filter((a) => a.status !== 'RESOLVED').length;
+  const overdueActionsCount =
+    summaryData?.overdueActions ?? actions.filter((a) => a.isOverdue || a.status === 'ESCALATED').length;
+  const totalMonitoredCentres = summaryData?.totalMonitoredCentres ?? centres.length;
+  const onlineCameras = summaryData?.onlineCameras ?? 0;
+  const avgCompliance =
+    summaryData?.complianceIndex ??
+    (centres.length > 0
+      ? Math.round(
+          centres.reduce((acc: any, c: any) => acc + (c.complianceScore || 80), 0) / centres.length
+        )
+      : 80);
 
   return (
     <div className="space-y-6">
@@ -78,340 +132,257 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Top KPI Cards (Section 26) */}
+      {/* Top 4 Required Government Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Monitored Centres"
-          value={centres.length}
-          subtitle="3 Active CCTV / Edge Feeds"
+          title="Total Centres"
+          value={summaryData?.totalCentres ?? totalMonitoredCentres}
+          subtitle="Accredited institutions monitored"
           icon={Building2}
-          badge={{ text: '100% Online', variant: 'positive' }}
+          badge={{ text: 'Active', variant: 'positive' }}
           onClick={() => onNavigate('centres')}
         />
         <StatCard
-          title="National Compliance Index"
-          value={`${avgCompliance}%`}
-          subtitle="Weighted: Attendance + Infra + Actions"
-          icon={ShieldCheck}
+          title="Pending AI Analysis"
+          value={summaryData?.pendingAnalysis ?? 0}
+          subtitle="Awaiting automated vision inference"
+          icon={Video}
           badge={{
-            text: avgCompliance >= 80 ? 'Compliant' : 'Review Required',
-            variant: avgCompliance >= 80 ? 'positive' : 'warning',
+            text: (summaryData?.pendingAnalysis ?? 0) > 0 ? 'Pending' : 'Queue Clear',
+            variant: (summaryData?.pendingAnalysis ?? 0) > 0 ? 'warning' : 'positive',
           }}
-          onClick={() => onNavigate('settings')}
+          onClick={() => onNavigate('ai_analysis')}
         />
         <StatCard
-          title="Active AI Alerts"
-          value={activeAlerts.length}
-          subtitle={`${criticalAlerts.length} High / Critical severity`}
+          title="Active Issues"
+          value={summaryData?.activeIssues ?? activeAlertsCount}
+          subtitle={`${criticalAlertsCount} High / Critical severity`}
           icon={AlertTriangle}
           badge={{
-            text: criticalAlerts.length > 0 ? `${criticalAlerts.length} Critical` : 'Stable',
-            variant: criticalAlerts.length > 0 ? 'critical' : 'positive',
+            text: criticalAlertsCount > 0 ? `${criticalAlertsCount} Critical` : 'Stable',
+            variant: criticalAlertsCount > 0 ? 'critical' : 'positive',
           }}
-          onClick={() => onNavigate('alerts')}
+          onClick={() => onNavigate('issues')}
         />
         <StatCard
           title="Pending Actions"
-          value={pendingActions.length}
-          subtitle={`${overdueActions.length} Escalated or Overdue`}
+          value={summaryData?.pendingActions ?? pendingActionsCount}
+          subtitle={`${summaryData?.overdueActions ?? 0} Escalated or Overdue`}
           icon={ClipboardList}
           badge={{
-            text: overdueActions.length > 0 ? `${overdueActions.length} Overdue` : 'On Track',
-            variant: overdueActions.length > 0 ? 'critical' : 'neutral',
+            text: (summaryData?.overdueActions ?? 0) > 0 ? 'Overdue' : 'Active',
+            variant: (summaryData?.overdueActions ?? 0) > 0 ? 'critical' : 'neutral',
           }}
-          onClick={() => onNavigate('actions')}
+          onClick={() => onNavigate('notices')}
         />
       </div>
 
-      {/* Main Analysis Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Cols: Visual Charts & Discrepancy Breakdown */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Centre Compliance Leaderboard */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                  Accredited Training Centres Compliance Status
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Real-time statutory compliance scores calculated from AI vision analytics
-                </p>
-              </div>
-              <button
-                onClick={() => onNavigate('centres')}
-                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-              >
-                <span>View All</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {centres.map((centre) => {
-                const isCompliant = centre.complianceScore >= 85;
-                const isFlagged = centre.complianceScore >= 70 && centre.complianceScore < 85;
-                return (
-                  <div
-                    key={centre.id}
-                    onClick={() => onNavigate('centre_detail', centre.id)}
-                    className="p-4 border border-slate-200 rounded-xl hover:border-indigo-300 hover:bg-slate-50/50 transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-                  >
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="font-bold text-xs text-slate-900">{centre.name}</span>
-                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-medium">
-                          {centre.code}
-                        </span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                            isCompliant
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : isFlagged
-                              ? 'bg-amber-100 text-amber-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {centre.status}
-                        </span>
-                      </div>
-                      <div className="flex items-center space-x-4 text-xs text-slate-500">
-                        <span>{centre.district}, {centre.state}</span>
-                        <span>•</span>
-                        <span>Approved Capacity: {centre.approvedTraineeCapacity} Trainees</span>
-                        <span>•</span>
-                        <span>{centre.cameraIds.length} IP Cameras</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-4 shrink-0">
-                      <div className="text-right">
-                        <div className="flex items-baseline justify-end space-x-1">
-                          <span className="text-lg font-bold text-slate-900">{centre.complianceScore}%</span>
-                          <span className="text-[10px] text-slate-400">Score</span>
-                        </div>
-                        <div className="w-28 bg-slate-100 h-2 rounded-full overflow-hidden mt-1">
-                          <div
-                            className={`h-full rounded-full ${
-                              isCompliant ? 'bg-emerald-500' : isFlagged ? 'bg-amber-500' : 'bg-rose-500'
-                            }`}
-                            style={{ width: `${centre.complianceScore}%` }}
-                          />
-                        </div>
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-slate-400" />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+      {/* Recent Centre Submissions Table (Section 6) */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-base font-bold text-slate-900 tracking-tight">
+              Recent Centre Submissions
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Live operational daily rosters and classroom footage submitted by accredited training centres
+            </p>
           </div>
-
-          {/* Attendance Comparison Visual Matrix */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                  Daily Attendance Audits (Reported vs AI Estimated)
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Aggregate presence estimation compared with centre-submitted portal logs
-                </p>
-              </div>
-              <button
-                onClick={() => onNavigate('attendance')}
-                className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-              >
-                <span>Full Ledger</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-200 text-slate-500 font-semibold bg-slate-50/70">
-                    <th className="py-2.5 px-3">Batch & Course</th>
-                    <th className="py-2.5 px-3">Reported Count</th>
-                    <th className="py-2.5 px-3">AI Estimated Presence</th>
-                    <th className="py-2.5 px-3">Variance</th>
-                    <th className="py-2.5 px-3">Compliance Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {attendance.map((rec) => {
-                    const isCrit = rec.status === 'DISCREPANCY_CRITICAL';
-                    const isWarn = rec.status === 'DISCREPANCY_WARNING';
-                    return (
-                      <tr key={rec.id} className="hover:bg-slate-50/50">
-                        <td className="py-3 px-3">
-                          <span className="font-bold text-slate-800 block">{rec.batchCode}</span>
-                          <span className="text-[11px] text-slate-500">{rec.courseName}</span>
-                        </td>
-                        <td className="py-3 px-3 font-semibold text-slate-700">
-                          {rec.reportedTrainees} Trainees
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className="font-bold text-indigo-700">
-                            {rec.aiEstimatedCount !== undefined ? `${rec.aiEstimatedCount} Trainees` : 'Scanning...'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`font-semibold ${
-                              isCrit ? 'text-rose-600' : isWarn ? 'text-amber-600' : 'text-emerald-600'
-                            }`}
-                          >
-                            {rec.discrepancyCount ? `-${rec.discrepancyCount} (${rec.discrepancyPercentage}%)` : '0% (Exact)'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
-                              isCrit
-                                ? 'bg-rose-100 text-rose-800'
-                                : isWarn
-                                ? 'bg-amber-100 text-amber-800'
-                                : 'bg-emerald-100 text-emerald-800'
-                            }`}
-                          >
-                            {rec.status.replace('_', ' ')}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <button
+            onClick={() => onNavigate('submissions')}
+            className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+          >
+            <span>View All Submissions</span>
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        {/* Right Col: Critical Alerts & Follow-up Queue */}
-        <div className="space-y-6">
-          {/* Active AI Alerts Card */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2">
-                <AlertTriangle className="w-4 h-4 text-rose-600" />
-                <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                  High & Critical AI Alerts ({criticalAlerts.length})
-                </h3>
-              </div>
-              <button
-                onClick={() => onNavigate('alerts')}
-                className="text-xs text-indigo-600 font-semibold hover:underline"
-              >
-                View all
-              </button>
-            </div>
+        {/* Desktop Table (hidden on mobile/small tablet) */}
+        <div className="hidden lg:block overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-500 font-bold bg-slate-50/80 uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-4">Centre</th>
+                <th className="py-3 px-4">Category</th>
+                <th className="py-3 px-4">Submission Date</th>
+                <th className="py-3 px-4 text-center">Attendance</th>
+                <th className="py-3 px-4 text-center">Video</th>
+                <th className="py-3 px-4 text-center">AI Status</th>
+                <th className="py-3 px-4 text-center">Issue</th>
+                <th className="py-3 px-4 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {summaryData?.recentSubmissions && summaryData.recentSubmissions.length > 0 ? (
+                summaryData.recentSubmissions.map((sub: any) => {
+                  const isCrit = sub.alertStatus === 'Critical Issue';
+                  const isWarn = sub.alertStatus === 'Attention';
+                  return (
+                    <tr key={sub.submissionId} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="py-3.5 px-4">
+                        <span className="font-bold text-slate-900 block">{sub.centreName}</span>
+                        <span className="font-mono text-[10px] text-slate-400">{sub.centreCode}</span>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="inline-block px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 font-medium text-[11px] border border-indigo-100">
+                          {sub.categoryName}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-slate-600">
+                        {sub.date}
+                      </td>
+                      <td className="py-3.5 px-4 text-center font-semibold text-slate-800">
+                        {sub.reportedAttendance} Trainees
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                          <Video className="w-3 h-3 text-indigo-600" />
+                          <span>Video Attached</span>
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
+                            sub.aiStatus === 'COMPLETED'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : sub.aiStatus === 'PROCESSING'
+                              ? 'bg-amber-100 text-amber-800 animate-pulse'
+                              : 'bg-blue-100 text-blue-800'
+                          }`}
+                        >
+                          {sub.aiStatus}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-center">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold ${
+                            isCrit
+                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                              : isWarn
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {sub.alertStatus}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <button
+                          onClick={() => onNavigate('submissions', sub.submissionId)}
+                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl shadow-2xs transition-colors inline-flex items-center gap-1"
+                        >
+                          <span>Open Submission</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                    No recent submissions recorded in database.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
-            <div className="space-y-3">
-              {alerts.slice(0, 3).map((alert) => (
-                <div
-                  key={alert.id}
-                  onClick={() => onNavigate('alerts')}
-                  className="p-3.5 border border-slate-200 rounded-xl hover:border-indigo-300 hover:bg-slate-50 transition-all cursor-pointer space-y-2"
-                >
-                  <div className="flex items-start justify-between">
+        {/* Mobile / Tablet Cards */}
+        <div className="block lg:hidden divide-y divide-slate-100">
+          {summaryData?.recentSubmissions && summaryData.recentSubmissions.length > 0 ? (
+            summaryData.recentSubmissions.map((sub: any) => {
+              const isCrit = sub.alertStatus === 'Critical Issue';
+              const isWarn = sub.alertStatus === 'Attention';
+              return (
+                <div key={sub.submissionId} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <span className="font-mono text-[10px] text-slate-400 block">{sub.centreCode}</span>
+                      <h4 className="font-bold text-slate-900 text-sm leading-tight">{sub.centreName}</h4>
+                    </div>
                     <span
-                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                        alert.severity === 'CRITICAL'
+                      className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold shrink-0 ${
+                        isCrit
                           ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : isWarn
+                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                          : 'bg-emerald-100 text-emerald-800'
                       }`}
                     >
-                      {alert.severity}
-                    </span>
-                    <span className="text-[10px] text-slate-400">{alert.detectedTime}</span>
-                  </div>
-
-                  <h4 className="text-xs font-bold text-slate-800 leading-snug">{alert.title}</h4>
-                  <p className="text-[11px] text-slate-500 line-clamp-2">{alert.description}</p>
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px]">
-                    <span className="font-medium text-slate-600">{alert.centreName}</span>
-                    <span className="text-indigo-600 font-semibold flex items-center gap-1">
-                      <span>Inspect Evidence</span>
-                      <ArrowUpRight className="w-3 h-3" />
+                      {sub.alertStatus}
                     </span>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
 
-          {/* Pending Actions & Statutory Deadlines */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center space-x-2">
-                <ClipboardList className="w-4 h-4 text-indigo-600" />
-                <h3 className="text-sm font-bold text-slate-900 tracking-tight">
-                  Action Lifecycle Queue
-                </h3>
-              </div>
-              <button
-                onClick={() => onNavigate('actions')}
-                className="text-xs text-indigo-600 font-semibold hover:underline"
-              >
-                Manage
-              </button>
-            </div>
-
-            <div className="space-y-3">
-              {actions.slice(0, 3).map((act) => {
-                const isOverdue = act.isOverdue || act.status === 'ESCALATED';
-                return (
-                  <div
-                    key={act.id}
-                    onClick={() => onNavigate('actions')}
-                    className="p-3.5 border border-slate-200 rounded-xl hover:border-indigo-300 hover:bg-slate-50 transition-all cursor-pointer space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold uppercase text-slate-500">
-                        {act.issueCategory.replace('_', ' ')}
-                      </span>
+                  <div className="grid grid-cols-2 gap-2 text-xs pt-1 border-t border-slate-100">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Category</span>
+                      <span className="font-medium text-slate-700">{sub.categoryName}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Date</span>
+                      <span className="font-mono text-slate-700">{sub.date}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">Attendance</span>
+                      <span className="font-bold text-slate-900">{sub.reportedAttendance} Trainees</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase block">AI Status</span>
                       <span
-                        className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
-                          isOverdue
-                            ? 'bg-rose-100 text-rose-700'
-                            : act.status === 'RESOLVED'
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-indigo-100 text-indigo-700'
+                        className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                          sub.aiStatus === 'COMPLETED'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-amber-100 text-amber-800'
                         }`}
                       >
-                        {act.status.replace('_', ' ')}
-                      </span>
-                    </div>
-
-                    <h4 className="text-xs font-bold text-slate-800 leading-snug">{act.title}</h4>
-
-                    <div className="flex items-center justify-between text-[10px] text-slate-500 pt-1">
-                      <span>Assigned to: {act.assignedToRole}</span>
-                      <span className={`font-semibold flex items-center gap-1 ${isOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
-                        <Clock className="w-3 h-3" />
-                        Due: {act.dueDate.split(' ')[0]}
+                        {sub.aiStatus}
                       </span>
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
 
-          {/* Quick Notice to Admin */}
-          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-xs text-slate-600 space-y-2">
-            <span className="font-bold text-slate-800 uppercase tracking-wider block">
-              Automated Escalation Rule (Statutory)
-            </span>
-            <p className="text-[11px] leading-relaxed text-slate-500">
-              Unresolved compliance notices exceeding 3 business days automatically escalate to the District Monitoring Officer. Notices exceeding 7 days trigger on-site physical inspection.
-            </p>
-            <div className="pt-2 flex justify-between items-center text-[11px]">
-              <span className="font-semibold text-slate-700">Audit Trail Enabled</span>
-              <span className="text-emerald-600 font-bold">100% Immutable</span>
+                  <button
+                    onClick={() => onNavigate('submissions', sub.submissionId)}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <span>Open Submission</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })
+          ) : (
+            <div className="py-8 text-center text-slate-400 text-xs">
+              No recent submissions recorded in database.
             </div>
-          </div>
+          )}
+        </div>
+      </div>
+
+      {/* Quick Notice Banner */}
+      <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 text-xs text-slate-600 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <span className="font-bold text-slate-800 uppercase tracking-wider block">
+            Statutory Compliance Pipeline: Centre Data → AI Video Analysis → Government Review → Issue Detection → Notice/Action → Follow-up
+          </span>
+          <p className="text-[11px] leading-relaxed text-slate-500 mt-0.5">
+            Real-time biometric-safe tracking across bounding boxes. Unresolved notices automatically flag centres for administrative inspection.
+          </p>
+        </div>
+        <div className="flex items-center space-x-3 shrink-0">
+          <button
+            onClick={() => onNavigate('issues')}
+            className="px-3.5 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 font-semibold text-slate-700 rounded-xl transition-colors"
+          >
+            Review Issues
+          </button>
+          <button
+            onClick={() => onNavigate('notices')}
+            className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 font-semibold text-white rounded-xl shadow-2xs transition-colors"
+          >
+            Actions & Notices
+          </button>
         </div>
       </div>
     </div>

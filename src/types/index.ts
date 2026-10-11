@@ -1,6 +1,7 @@
-// KAVACH-AI Platform Type Definitions
+// SkillGuard AI Platform Type Definitions
+// AI-Powered Training Centre Compliance & Monitoring Platform
 
-export type UserRole = 'gov_admin' | 'gov_officer' | 'centre_admin' | 'super_admin';
+export type UserRole = 'SUPER_ADMIN' | 'GOVERNMENT_ADMIN' | 'MONITORING_OFFICER' | 'CENTRE_ADMIN';
 
 export interface User {
   id: string;
@@ -9,11 +10,19 @@ export interface User {
   role: UserRole;
   designation: string;
   department: string;
+  mobile?: string;
+  employeeId?: string;
+  centreCode?: string;
+  centreName?: string;
+  district?: string;
+  status: 'ACTIVE' | 'PENDING_APPROVAL' | 'SUSPENDED';
   assignedCentres?: string[]; // IDs
   avatar?: string;
+  createdAt?: string;
+  lastLogin?: string;
 }
 
-export type CentreStatus = 'ACTIVE' | 'UNDER_REVIEW' | 'FLAGGED' | 'SUSPENDED';
+export type CentreStatus = 'COMPLIANT' | 'ATTENTION_REQUIRED' | 'CRITICAL';
 
 export interface ApprovedInventory {
   computers: number;
@@ -40,6 +49,8 @@ export interface TrainingCentre {
   cameraIds: string[];
   lastInspectionDate: string;
   nextInspectionDate: string;
+  lastMonitoringDate: string;
+  cameraStatus: 'ONLINE' | 'OFFLINE' | 'PARTIAL';
   complianceScore: number; // 0 - 100
   attendanceComplianceRate: number; // 0 - 100
   infrastructureComplianceRate: number; // 0 - 100
@@ -54,9 +65,11 @@ export interface CameraStream {
   rtspUrl: string; // Hidden in UI
   resolution: string;
   fps: number;
-  status: 'ONLINE' | 'OFFLINE' | 'DEGRADED';
-  lastPing: string;
+  status: 'CONNECTED' | 'DISCONNECTED' | 'ERROR';
+  lastSeen: string;
   isSimulated: boolean;
+  processingMode: 'EDGE_INFERENCE' | 'CLOUD_STREAM';
+  bandwidthMode: 'LOW' | 'MEDIUM' | 'HIGH';
 }
 
 export interface AttendanceRecord {
@@ -65,6 +78,7 @@ export interface AttendanceRecord {
   date: string;
   batchCode: string;
   courseName: string;
+  session: 'Morning (09:00 - 12:00)' | 'Afternoon (13:00 - 16:00)' | 'Evening (16:00 - 19:00)';
   reportedTrainees: number;
   sessionStartTime: string;
   sessionEndTime: string;
@@ -72,7 +86,7 @@ export interface AttendanceRecord {
   aiEstimatedCount?: number;
   discrepancyCount?: number;
   discrepancyPercentage?: number;
-  status: 'VERIFIED' | 'DISCREPANCY_WARNING' | 'DISCREPANCY_CRITICAL' | 'PENDING_AI_SCAN';
+  status: 'VERIFIED' | 'DISCREPANCY_WARNING' | 'DISCREPANCY_CRITICAL' | 'REQUIRES_CLARIFICATION';
 }
 
 export type DetectedClass = 'person' | 'computer' | 'workbench' | 'machine' | 'chair' | 'damaged_equipment';
@@ -83,7 +97,7 @@ export interface DetectionBox {
   confidence: number;
   trackId?: number;
   bbox: [number, number, number, number]; // [x, y, width, height] normalized (0 to 1)
-  condition?: 'OPERATIONAL' | 'POTENTIAL_DAMAGE' | 'OBSTRUCTED' | 'UNUSABLE';
+  condition?: 'OPERATIONAL' | 'POTENTIAL_DAMAGE' | 'OBSTRUCTED' | 'POTENTIAL_ISSUE';
   timestamp: string;
 }
 
@@ -105,13 +119,15 @@ export type AlertSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 export type AlertCategory =
   | 'ATTENDANCE_MISMATCH'
   | 'INFRASTRUCTURE_SHORTAGE'
-  | 'EQUIPMENT_DAMAGE'
+  | 'EQUIPMENT_ISSUE'
+  | 'REPEATED_DISCREPANCY'
   | 'CAMERA_OFFLINE'
-  | 'OVERDUE_ACTION'
-  | 'UNAUTHORIZED_ABSENCE';
+  | 'VIDEO_ANALYSIS_FAILED'
+  | 'OVERDUE_ACTION';
 
 export interface AlertEvidence {
   snapshotUrl: string;
+  videoClipUrl?: string;
   timestamp: string;
   cameraId: string;
   cameraName: string;
@@ -139,6 +155,8 @@ export interface ComplianceAlert {
   title: string;
   description: string;
   aiConfidence: number;
+  observedValue?: number | string;
+  expectedValue?: number | string;
   status: 'NEW' | 'CONFIRMED' | 'FALSE_POSITIVE' | 'ACTION_CREATED' | 'RESOLVED';
   evidence: AlertEvidence;
   actionId?: string;
@@ -147,16 +165,14 @@ export interface ComplianceAlert {
 
 export type ActionStatus =
   | 'NEW'
-  | 'UNDER_REVIEW'
-  | 'ACTION_ASSIGNED'
+  | 'ASSIGNED'
   | 'IN_PROGRESS'
-  | 'SUBMITTED_FOR_VERIFICATION'
-  | 'VERIFIED'
+  | 'SUBMITTED'
+  | 'VERIFICATION'
   | 'RESOLVED'
-  | 'REJECTED'
   | 'REOPENED'
   | 'ESCALATED'
-  | 'REINSPECTION_REQUIRED';
+  | 'CANCELLED';
 
 export type ActionPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -175,18 +191,21 @@ export interface ComplianceAction {
   alertId?: string;
   centreId: string;
   centreName: string;
+  issue: string;
   title: string;
   description: string;
   issueCategory: AlertCategory;
   priority: ActionPriority;
   status: ActionStatus;
   assignedOfficerName: string;
+  assignedPerson: string; // Centre Principal / Compliance Admin
   assignedToRole: string; // 'Centre Admin'
+  instructions?: string;
   createdAt: string;
   dueDate: string;
   resolvedAt?: string;
   isOverdue: boolean;
-  escalationLevel: number; // 0 = none, 1 = reminder, 2 = district, 3 = state director
+  escalationLevel: number; // 0 = none, 1 = reminder, 2 = overdue, 3 = escalated
   centreResponse?: {
     explanation: string;
     submittedAt: string;
@@ -194,20 +213,36 @@ export interface ComplianceAction {
     proofDocumentName?: string;
     proofDocumentUrl?: string;
     proofPhotoUrl?: string;
+    proofVideoUrl?: string;
   };
   verification?: {
     verifiedBy: string;
     verifiedAt: string;
-    outcome: 'APPROVED' | 'REJECTED' | 'REINSPECTION_ORDERED';
+    outcome: 'APPROVED' | 'REJECTED' | 'MORE_INFO_REQUESTED' | 'REINSPECTION_REQUESTED';
     mandatoryRemarks: string;
   };
   timeline: {
-    status: ActionStatus;
+    status: ActionStatus | string;
     timestamp: string;
     actor: string;
     note: string;
   }[];
   comments: ActionComment[];
+}
+
+export interface InspectionRecord {
+  id: string;
+  centreId: string;
+  centreName: string;
+  inspectionType: 'Routine' | 'AI Triggered' | 'Complaint' | 'Repeated Violation' | 'Infrastructure Verification';
+  reason: string;
+  assignedOfficer: string;
+  date: string;
+  notes: string;
+  status: 'SCHEDULED' | 'IN_PROGRESS' | 'COMPLETED';
+  outcome?: 'PASS' | 'FAIL' | 'CONDITIONAL' | 'REINSPECTION_REQUIRED';
+  findings?: string;
+  reportUrl?: string;
 }
 
 export interface AuditLogEntry {
@@ -217,7 +252,8 @@ export interface AuditLogEntry {
   userRole: UserRole;
   action: string;
   timestamp: string;
-  entityType: 'CENTRE' | 'ALERT' | 'ACTION' | 'ATTENDANCE' | 'INVENTORY' | 'SYSTEM' | 'ML_MODEL';
+  centreName?: string;
+  entityType: 'CENTRE' | 'ALERT' | 'ACTION' | 'ATTENDANCE' | 'INVENTORY' | 'SYSTEM' | 'ML_MODEL' | 'SECURITY' | 'INSPECTION';
   entityId: string;
   previousState?: string;
   newState?: string;
@@ -225,22 +261,28 @@ export interface AuditLogEntry {
 }
 
 export interface SystemSettings {
-  attendanceWarningThresholdPercent: number; // e.g. 5%
-  attendanceCriticalThresholdPercent: number; // e.g. 10%
-  complianceWeightAttendance: number; // e.g. 40
-  complianceWeightInfrastructure: number; // e.g. 35
-  complianceWeightActions: number; // e.g. 25
+  attendanceWarningThresholdPercent: number; // e.g. 10%
+  attendanceCriticalThresholdPercent: number; // e.g. 20%
+  complianceWeightAttendance: number; // e.g. 40%
+  complianceWeightInfrastructure: number; // e.g. 40%
+  complianceWeightActions: number; // e.g. 20%
   frameSamplingRateFps: number; // 5
   lowBandwidthModeEnabled: boolean;
+  bandwidthMode: 'LOW' | 'MEDIUM' | 'HIGH';
   privacyStrictAnonymization: boolean;
-  autoEscalationDaysOverdue: number; // 3
+  escalationReminderDays: number; // Day 2
+  escalationOverdueDays: number; // Day 3
+  escalationHigherAuthorityDays: number; // Day 5
+  autoEscalationDaysOverdue?: number; // legacy alias
 }
 
 export interface MLModelInfo {
   modelId: string;
+  modelName: string;
+  version: string;
   architecture: string;
   framework: string;
-  status: string;
+  status: 'ACTIVE' | 'ARCHIVED' | 'STAGING';
   trainingDate: string;
   datasetVersion: string;
   epochs: number;
@@ -257,9 +299,12 @@ export interface MLModelInfo {
   perClass: Record<string, {
     precision: number;
     recall: number;
+    f1_score?: number;
     mAP50: number;
     mAP50_95: number;
     support: number;
+    falsePositives?: number;
+    falseNegatives?: number;
   }>;
 }
 
@@ -284,4 +329,15 @@ export interface VideoProcessingJob {
     damaged_equipment: number;
   };
   alertsGeneratedCount: number;
+}
+
+export interface NotificationItem {
+  id: string;
+  category: 'CRITICAL_ALERT' | 'ACTION_ASSIGNED' | 'ACTION_DUE' | 'ACTION_OVERDUE' | 'CENTRE_RESPONSE' | 'INSPECTION' | 'SYSTEM';
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  linkTab: string;
+  targetId?: string;
 }

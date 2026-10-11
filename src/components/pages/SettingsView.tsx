@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Settings,
   Sliders,
@@ -8,32 +8,70 @@ import {
   RotateCcw,
   CheckCircle2,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 
 export const SettingsView: React.FC = () => {
-  const currentSettings = appState.settings;
+  const [wAttendance, setWAttendance] = useState(40);
+  const [wInfra, setWInfra] = useState(40);
+  const [wAction, setWAction] = useState(20);
 
-  const [wAttendance, setWAttendance] = useState(currentSettings.complianceWeightAttendance);
-  const [wInfra, setWInfra] = useState(currentSettings.complianceWeightInfrastructure);
-  const [wAction, setWAction] = useState(currentSettings.complianceWeightActions);
+  const [thWarning, setThWarning] = useState(10);
+  const [thCritical, setThCritical] = useState(20);
 
-  const [thWarning, setThWarning] = useState(currentSettings.attendanceWarningThresholdPercent);
-  const [thCritical, setThCritical] = useState(currentSettings.attendanceCriticalThresholdPercent);
-
-  const [lowBandwidth, setLowBandwidth] = useState(currentSettings.lowBandwidthModeEnabled);
-  const [samplingFps, setSamplingFps] = useState(currentSettings.frameSamplingRateFps);
-  const [escalationDays, setEscalationDays] = useState(currentSettings.autoEscalationDaysOverdue);
+  const [lowBandwidth, setLowBandwidth] = useState(false);
+  const [samplingFps, setSamplingFps] = useState(5);
+  const [escalationDays, setEscalationDays] = useState(3);
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const s = await api.getSettings();
+        if (s && s.compliance_weight_attendance) {
+          setWAttendance(Number(s.compliance_weight_attendance));
+          setWInfra(Number(s.compliance_weight_infrastructure));
+          setWAction(Number(s.compliance_weight_actions));
+          setThWarning(Number(s.attendance_warning_threshold));
+          setThCritical(Number(s.attendance_critical_threshold));
+          setLowBandwidth(s.low_bandwidth_mode === 'true');
+          setSamplingFps(Number(s.default_detection_fps));
+          setEscalationDays(Number(s.auto_escalation_days));
+        }
+      } catch (err) {
+        console.error('Failed to load settings from MySQL:', err);
+      }
+    };
+    fetchSettings();
+  }, []);
 
   const totalWeights = Number(wAttendance) + Number(wInfra) + Number(wAction);
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (totalWeights !== 100) {
       alert(`Weights must sum to 100%. Current total: ${totalWeights}%`);
       return;
+    }
+
+    setIsSaving(true);
+    try {
+      await api.updateSettings({
+        compliance_weight_attendance: Number(wAttendance),
+        compliance_weight_infrastructure: Number(wInfra),
+        compliance_weight_actions: Number(wAction),
+        attendance_warning_threshold: Number(thWarning),
+        attendance_critical_threshold: Number(thCritical),
+        low_bandwidth_mode: lowBandwidth,
+        default_detection_fps: Number(samplingFps),
+        auto_escalation_days: Number(escalationDays),
+      });
+    } catch (err) {
+      console.error('Failed to update settings in MySQL:', err);
     }
 
     appState.updateSettings({
@@ -47,14 +85,37 @@ export const SettingsView: React.FC = () => {
       autoEscalationDaysOverdue: Number(escalationDays),
     });
 
+    setIsSaving(false);
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
-  const handleResetDefaults = () => {
-    if (confirm('Reset all demo data and system settings back to default values?')) {
-      appState.resetToDefaults();
-      window.location.reload();
+  const handleResetDefaults = async () => {
+    if (confirm('Reset system settings back to statutory default values?')) {
+      try {
+        await api.updateSettings({
+          compliance_weight_attendance: 40,
+          compliance_weight_infrastructure: 40,
+          compliance_weight_actions: 20,
+          attendance_warning_threshold: 10,
+          attendance_critical_threshold: 20,
+          low_bandwidth_mode: false,
+          default_detection_fps: 5,
+          auto_escalation_days: 3,
+        });
+        setWAttendance(40);
+        setWInfra(40);
+        setWAction(20);
+        setThWarning(10);
+        setThCritical(20);
+        setLowBandwidth(false);
+        setSamplingFps(5);
+        setEscalationDays(3);
+        setSavedSuccess(true);
+        setTimeout(() => setSavedSuccess(false), 3000);
+      } catch (e) {
+        console.error(e);
+      }
     }
   };
 

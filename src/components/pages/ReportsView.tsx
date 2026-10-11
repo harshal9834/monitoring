@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileBarChart,
   Download,
@@ -11,16 +11,48 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { appState } from '../../services/storage';
+import { api } from '../../services/api';
 
 export const ReportsView: React.FC = () => {
   const [selectedReportType, setSelectedReportType] = useState<
     'compliance' | 'attendance' | 'inventory' | 'actions'
   >('compliance');
 
-  const centres = appState.centres;
-  const attendance = appState.attendanceRecords;
-  const actions = appState.actions;
-  const alerts = appState.alerts;
+  const currentUser = appState.currentUser;
+  const isCentreRole = currentUser.role === 'CENTRE_ADMIN';
+  const assignedCentreId = currentUser.assignedCentres?.[0] || 'tc_001';
+
+  const [centres, setCentres] = useState<any[]>([]);
+  const [attendance, setAttendance] = useState<any[]>([]);
+  const [actions, setActions] = useState<any[]>([]);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadReportsData = async () => {
+      try {
+        setLoading(true);
+        const [ctrs, atts, acts, alts] = await Promise.all([
+          api.getCentres().catch(() => []),
+          (isCentreRole ? api.getCentreAttendance() : api.getAttendance()).catch(() => []),
+          (isCentreRole ? api.getCentreActions() : api.getActions()).catch(() => []),
+          (isCentreRole ? api.getCentreAlerts() : api.getAlerts()).catch(() => []),
+        ]);
+        const filteredCentres = isCentreRole
+          ? (ctrs || []).filter((c: any) => c.id === assignedCentreId)
+          : ctrs || [];
+        setCentres(filteredCentres);
+        setAttendance(atts || []);
+        setActions(acts || []);
+        setAlerts(alts || []);
+      } catch (err) {
+        console.error('Failed to load report data from MySQL:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadReportsData();
+  }, [isCentreRole]);
 
   // Real CSV Generator & Downloader
   const handleDownloadCSV = () => {

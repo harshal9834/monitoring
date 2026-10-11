@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AlertTriangle,
   Filter,
@@ -9,7 +9,9 @@ import {
   Camera,
   Search,
   ArrowUpRight,
+  Loader2,
 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 import { ComplianceAlert, AlertSeverity, AlertCategory } from '../../types';
 import { AlertDetailModal } from './AlertDetailModal';
@@ -24,8 +26,41 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [alerts, setAlerts] = useState<ComplianceAlert[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
 
-  const alerts = appState.alerts;
+  const currentUser = appState.currentUser;
+  const isCentreRole = currentUser.role === 'CENTRE_ADMIN';
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchAlerts = async (isInitial = false) => {
+      try {
+        if (isInitial) setLoading(true);
+        const data = isCentreRole
+          ? await api.getCentreAlerts()
+          : await api.getAlerts({ severity: filterSeverity !== 'ALL' ? filterSeverity : undefined });
+        if (isMounted) {
+          setAlerts(Array.isArray(data) ? data : []);
+          if (isInitial) setLoading(false);
+        }
+      } catch (err) {
+        console.error('Failed to load alerts from MySQL:', err);
+        if (isMounted) {
+          setAlerts([]);
+          if (isInitial) setLoading(false);
+        }
+      }
+    };
+    fetchAlerts(true);
+    const interval = setInterval(() => {
+      fetchAlerts(false);
+    }, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, [filterSeverity, isCentreRole]);
 
   const filteredAlerts = alerts.filter((a) => {
     if (filterSeverity !== 'ALL' && a.severity !== filterSeverity) return false;
@@ -45,6 +80,7 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
   const criticalCount = alerts.filter((a) => a.severity === 'CRITICAL').length;
   const highCount = alerts.filter((a) => a.severity === 'HIGH').length;
   const mediumCount = alerts.filter((a) => a.severity === 'MEDIUM').length;
+
 
   return (
     <div className="space-y-6">
@@ -142,14 +178,26 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
       </div>
 
       {/* Alerts Grid / Table */}
-      <div className="space-y-3">
-        {filteredAlerts.map((alert) => {
-          const isCritical = alert.severity === 'CRITICAL';
-          const isHigh = alert.severity === 'HIGH';
+      {loading ? (
+        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200">
+          <Loader2 className="w-8 h-8 animate-spin text-rose-600 mb-2" />
+          <p className="text-sm font-medium text-slate-600">Querying MySQL Alert Records...</p>
+        </div>
+      ) : filteredAlerts.length === 0 ? (
+        <div className="flex flex-col items-center justify-center p-12 bg-white rounded-2xl border border-slate-200 text-center">
+          <CheckCircle className="w-10 h-10 text-emerald-500 mb-2" />
+          <p className="text-sm font-semibold text-slate-700">No compliance alerts detected</p>
+          <p className="text-xs text-slate-500">All centres and AI monitoring streams are operating within normal parameters.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {filteredAlerts.map((alert) => {
+            const isCritical = alert.severity === 'CRITICAL';
+            const isHigh = alert.severity === 'HIGH';
 
-          return (
-            <div
-              key={alert.id}
+            return (
+              <div
+                key={alert.id}
               className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs hover:border-indigo-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
             >
               {/* Left thumbnail & title */}
@@ -254,13 +302,8 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
             </div>
           );
         })}
-
-        {filteredAlerts.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 text-slate-400 text-xs">
-            No compliance alerts matching selected filters.
-          </div>
-        )}
       </div>
+      )}
 
       {/* Evidence Inspection & Action Modal */}
       {selectedAlert && (

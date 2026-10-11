@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ArrowLeft,
   Building2,
@@ -15,14 +15,16 @@ import {
   MapPin,
   CheckCircle2,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 import { NavTab } from '../common/Sidebar';
 
 interface CentreDetailViewProps {
   centreId: string;
   onBack: () => void;
-  onNavigate: (tab: NavTab) => void;
+  onNavigate: (tab: NavTab, targetId?: string) => void;
 }
 
 export const CentreDetailView: React.FC<CentreDetailViewProps> = ({
@@ -34,14 +36,45 @@ export const CentreDetailView: React.FC<CentreDetailViewProps> = ({
     'overview' | 'attendance' | 'infrastructure' | 'cameras' | 'alerts' | 'actions' | 'audit'
   >('overview');
 
-  const centre = appState.centres.find((c) => c.id === centreId) || appState.centres[0];
-  const centreAttendance = appState.attendanceRecords.filter((a) => a.centreId === centre.id);
-  const centreAlerts = appState.alerts.filter((a) => a.centreId === centre.id);
-  const centreActions = appState.actions.filter((a) => a.centreId === centre.id);
-  const centreCameras = appState.cameras.filter((c) => c.centreId === centre.id);
-  const centreAudit = appState.auditLogs.filter((l) => l.entityId === centre.id || l.entityId.startsWith('act_') || l.entityId.startsWith('alt_'));
+  const [centre, setCentre] = useState<any>(null);
+  const [centreAttendance, setCentreAttendance] = useState<any[]>([]);
+  const [centreAlerts, setCentreAlerts] = useState<any[]>([]);
+  const [centreActions, setCentreActions] = useState<any[]>([]);
+  const [centreCameras, setCentreCameras] = useState<any[]>([]);
+  const [centreAudit, setCentreAudit] = useState<any[]>([]);
 
-  const isCompliant = centre.complianceScore >= 85;
+  useEffect(() => {
+    const loadDetails = async () => {
+      try {
+        const detail = await api.getCentreDetail(centreId).catch(() => null);
+        if (detail) {
+          setCentre(detail);
+          setCentreAttendance(detail.attendance || []);
+          setCentreAlerts(detail.alerts || []);
+          setCentreActions(detail.actions || []);
+          setCentreCameras(detail.cameras || []);
+        } else {
+          const centres = await api.getCentres().catch(() => []);
+          const found = centres.find((c: any) => c.id === centreId);
+          if (found) setCentre(found);
+        }
+      } catch (err) {
+        console.error('Failed to load centre detail from MySQL:', err);
+      }
+    };
+    loadDetails();
+  }, [centreId]);
+
+  if (!centre) {
+    return (
+      <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200">
+        <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
+        <p className="text-xs font-semibold">Loading accredited centre details from MySQL...</p>
+      </div>
+    );
+  }
+
+  const isCompliant = centre?.complianceScore >= 85;
 
   return (
     <div className="space-y-6">
@@ -172,14 +205,47 @@ export const CentreDetailView: React.FC<CentreDetailViewProps> = ({
               </div>
             </div>
 
-            <div className="p-4 bg-indigo-50/60 rounded-xl border border-indigo-100 text-xs text-indigo-900 flex items-center justify-between">
-              <span>Need to audit current batch video live?</span>
-              <button
-                onClick={() => onNavigate('video_monitoring')}
-                className="px-3 py-1.5 bg-indigo-600 text-white font-semibold rounded-lg shadow-xs"
-              >
-                Launch AI Video Stream
-              </button>
+            {/* Latest Submission Card with Prominent OPEN AI ANALYSIS button */}
+            <div className="p-4 bg-white border border-slate-200 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 block">
+                    Latest Centre Submission
+                  </span>
+                  <span className="text-sm font-bold text-slate-900">
+                    {centre.latestSubmission?.submissionDate ? `Date: ${centre.latestSubmission.submissionDate}` : 'Recent Submission'}
+                  </span>
+                </div>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                  centre.latestSubmission?.status === 'DISCREPANCY_CRITICAL'
+                    ? 'bg-rose-100 text-rose-800'
+                    : 'bg-emerald-100 text-emerald-800'
+                }`}>
+                  {centre.latestSubmission?.status || 'SUBMITTED'}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Reported Attendance:</span>
+                  <span className="font-bold text-slate-800">{centre.latestSubmission?.reportedAttendance ?? 40} Trainees</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Sanctioned Registered:</span>
+                  <span className="font-bold text-slate-800">{centre.latestSubmission?.totalRegistered ?? 40} Trainees</span>
+                </div>
+              </div>
+
+              <div className="pt-1 flex items-center justify-between">
+                <span className="text-xs text-slate-500">AI Video Analytics & Visual Verification:</span>
+                <button
+                  onClick={() => onNavigate('ai_analysis', centre.id)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                >
+                  <Video className="w-4 h-4" />
+                  <span>OPEN AI ANALYSIS</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

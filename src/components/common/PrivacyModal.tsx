@@ -40,9 +40,9 @@ export const PrivacyModal: React.FC<PrivacyModalProps> = ({ isOpen, onClose }) =
             <div>
               <h4 className="text-xs font-bold text-emerald-900">Zero Biometric Facial Recognition</h4>
               <p className="text-xs text-emerald-800 mt-1">
-                KAVACH-AI explicitly does <strong>NOT</strong> perform facial recognition, facial landmark
-                extraction, emotion detection, or biometric identification. Trainees are detected solely as
-                aggregate geometric person bounding boxes (<code className="bg-emerald-100 px-1 py-0.5 rounded text-[11px]">class: person</code>).
+                "SkillGuard AI estimates aggregate physical presence and does not perform facial identification."
+                The platform explicitly does <strong>NOT</strong> identify trainee name, student ID, facial features,
+                or biometric identity. Trainees are processed strictly as anonymous aggregate objects (<code className="bg-emerald-100 px-1 py-0.5 rounded text-[11px]">class: person</code>).
               </p>
             </div>
           </div>

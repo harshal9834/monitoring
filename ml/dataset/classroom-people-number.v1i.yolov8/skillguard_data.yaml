@@ -1,0 +1,12 @@
+path: C:/Users/Admin/Downloads/SIH245/monitoring/ml/dataset/classroom-people-number.v1i.yolov8
+train: train/images
+val: valid/images
+test: test/images
+names: &id001
+- person
+nc: 1
+metadata:
+  source: Provided Classroom Dataset (Roboflow CC BY 4.0)
+  total_images: 4328
+  total_boxes: 109768
+  classes: *id001

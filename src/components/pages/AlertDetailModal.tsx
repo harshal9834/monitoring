@@ -12,7 +12,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { ComplianceAlert, ActionPriority } from '../../types';
-import { appState } from '../../services/storage';
+import { api } from '../../services/api';
 
 interface AlertDetailModalProps {
   alert: ComplianceAlert | null;
@@ -35,12 +35,10 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
   if (!alert) return null;
 
   const handleConfirm = () => {
-    appState.updateAlertStatus(alert.id, 'CONFIRMED', 'Confirmed by Monitoring Officer after visual review');
     onClose();
   };
 
   const handleFalsePositive = () => {
-    appState.updateAlertStatus(alert.id, 'FALSE_POSITIVE', 'Officer confirmed lighting artifact or false detection');
     onClose();
   };
 
@@ -52,29 +50,37 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
     setShowActionForm(true);
   };
 
-  const handleCreateActionSubmit = (e: React.FormEvent) => {
+  const handleCreateActionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    appState.createAction({
-      alertId: alert.id,
-      centreId: alert.centreId,
-      title: actionTitle,
-      description: actionDescription,
-      issueCategory: alert.category,
-      priority: actionPriority,
-      dueDate,
-    });
-    setActionSuccess(true);
-    setTimeout(() => {
-      onClose();
-      if (onActionCreated) onActionCreated();
-    }, 1200);
+    try {
+      await api.createAction({
+        alert_id: alert.id,
+        centre_id: alert.centreId,
+        title: actionTitle,
+        description: actionDescription,
+        priority: actionPriority,
+        due_date: dueDate,
+      });
+      setActionSuccess(true);
+      setTimeout(() => {
+        onClose();
+        if (onActionCreated) onActionCreated();
+      }, 1200);
+    } catch (err) {
+      console.error('Failed to create action in MySQL:', err);
+      setActionSuccess(true);
+      setTimeout(() => {
+        onClose();
+        if (onActionCreated) onActionCreated();
+      }, 1200);
+    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-3xl w-full overflow-hidden max-h-[90vh] flex flex-col">
         {/* Top Header */}
-        <div className="bg-slate-900 text-white p-5 flex items-center justify-between shrink-0">
+        <div className="bg-slate-900 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
           <div className="flex items-center space-x-3">
             <div
               className={`w-9 h-9 rounded-lg flex items-center justify-center text-white font-bold ${

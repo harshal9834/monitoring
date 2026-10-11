@@ -40,7 +40,7 @@ export const GuidedTourModal: React.FC<GuidedTourModalProps> = ({
       roleLabel: 'Dr. Alok Verma (Govt Admin)',
       summary: 'Review government sanctioned capacity and mandatory inventory.',
       details: [
-        'Centre: Apex National Skill Academy, Pune (MH-PUN-TC-0842)',
+        'Centre: ABC Skill Centre, Pune (MH-PUN-TC-0842)',
         'Approved Trainee Capacity: 40 Trainees per batch',
         'Approved Mandatory Inventory: Computer: 20, Workbench: 5, Machine: 3, Chair: 40',
         'Active CCTV Cameras: 3 IP Cameras connected over RTSP',
@@ -157,17 +157,15 @@ export const GuidedTourModal: React.FC<GuidedTourModalProps> = ({
   const current = steps[currentStep];
 
   const handleApplyStep = () => {
-    // Switch to appropriate user role for this step to demonstrate perspective
-    appState.switchUser(current.role);
     onNavigateTab(current.tab);
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-2xl w-full overflow-hidden max-h-[90vh] overflow-y-auto">
         {/* Header */}
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 relative">
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-5 sm:p-6 relative">
           <button
             onClick={onClose}
             className="absolute top-5 right-5 text-slate-400 hover:text-white transition-colors"

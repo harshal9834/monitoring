@@ -1,8 +1,35 @@
+# Dependencies
 node_modules/
-build/
+.venv/
+venv/
+ENV/
+
+# Build artifacts
 dist/
+build/
 coverage/
-.DS_Store
-*.log
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Environment files
 .env*
 !.env.example
+
+# Logs and runtime files
+*.log
+__pycache__/
+*.py[cod]
+
+# Large local storage and database directories (Do not commit to GitHub)
+mysql_data/
+storage/captures/
+storage/evidence/
+storage/reports/
+storage/temp/
+storage/fallback_media/
+storage/cloud_media/
+
+# System files
+.DS_Store
+Thumbs.db

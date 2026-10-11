@@ -1,12 +1,40 @@
-import React, { useState } from 'react';
-import { History, Search, Shield, Filter, User, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { History, Search, Shield, Filter, User, ArrowRight, Loader2 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 
 export const AuditLogView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [entityFilter, setEntityFilter] = useState('ALL');
+  const [logs, setLogs] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const logs = appState.auditLogs;
+  const currentUser = appState.currentUser;
+  const isCentreRole = currentUser.role === 'CENTRE_ADMIN';
+  const assignedCentreId = currentUser.assignedCentres?.[0] || 'tc_001';
+
+  useEffect(() => {
+    const fetchLogs = async () => {
+      try {
+        setLoading(true);
+        const data = await api.getAuditLogs();
+        if (Array.isArray(data)) {
+          setLogs(isCentreRole
+            ? data.filter((l: any) => l.entityId === assignedCentreId || l.entityId?.startsWith('act_') || l.entityId?.startsWith('att_'))
+            : data
+          );
+        } else {
+          setLogs([]);
+        }
+      } catch (err) {
+        console.error('Failed to load audit logs from MySQL:', err);
+        setLogs([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchLogs();
+  }, [isCentreRole]);
 
   const filteredLogs = logs.filter((l) => {
     if (entityFilter !== 'ALL' && l.entityType !== entityFilter) return false;

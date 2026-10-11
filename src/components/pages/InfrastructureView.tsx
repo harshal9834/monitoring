@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
   CheckCircle2,
@@ -10,14 +10,50 @@ import {
   Building2,
   AlertOctagon,
   Eye,
+  Loader2,
 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 
 export const InfrastructureView: React.FC = () => {
-  const [selectedCentreId, setSelectedCentreId] = useState('tc_001');
+  const currentUser = appState.currentUser;
+  const isCentreRole = currentUser.role === 'CENTRE_ADMIN';
+  const assignedCentreId = currentUser.assignedCentres?.[0] || 'tc_001';
 
-  const centres = appState.centres;
+  const [selectedCentreId, setSelectedCentreId] = useState(isCentreRole ? assignedCentreId : '');
+  const [centres, setCentres] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const loadCentres = async () => {
+      try {
+        const data = await api.getCentres();
+        if (Array.isArray(data) && data.length > 0) {
+          const filtered = isCentreRole ? data.filter((c: any) => c.id === assignedCentreId) : data;
+          setCentres(filtered);
+          if (filtered.length > 0 && !selectedCentreId) {
+            setSelectedCentreId(filtered[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load centres for infrastructure view:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadCentres();
+  }, [isCentreRole]);
+
   const activeCentre = centres.find((c) => c.id === selectedCentreId) || centres[0];
+
+  if (loading || !activeCentre) {
+    return (
+      <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200">
+        <div className="animate-spin w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
+        <p className="text-xs font-semibold">Loading accredited infrastructure from MySQL...</p>
+      </div>
+    );
+  }
 
   // Scanned asset states for the selected centre
   const inventoryStatus = [
@@ -85,20 +121,26 @@ export const InfrastructureView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center space-x-2 text-xs">
-          <span className="font-semibold text-slate-600">Select Centre:</span>
-          <select
-            value={selectedCentreId}
-            onChange={(e) => setSelectedCentreId(e.target.value)}
-            className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500"
-          >
-            {centres.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-          </select>
-        </div>
+        {!isCentreRole ? (
+          <div className="flex items-center space-x-2 text-xs">
+            <span className="font-semibold text-slate-600">Select Centre:</span>
+            <select
+              value={selectedCentreId}
+              onChange={(e) => setSelectedCentreId(e.target.value)}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-800 focus:ring-2 focus:ring-indigo-500"
+            >
+              {centres.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} ({c.code})
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="text-xs bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg font-semibold">
+            Centre: <span className="text-indigo-700 font-bold">{activeCentre.name} ({activeCentre.code})</span>
+          </div>
+        )}
       </div>
 
       {/* Section 16: Apparent Operability Principle Banner */}

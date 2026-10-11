@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ClipboardCheck,
   Clock,
@@ -15,7 +15,9 @@ import {
   Send,
   Calendar,
   AlertOctagon,
+  Loader2,
 } from 'lucide-react';
+import { api } from '../../services/api';
 import { appState } from '../../services/storage';
 import { ComplianceAction, ActionStatus, ActionPriority } from '../../types';
 
@@ -23,6 +25,9 @@ export const ActionsView: React.FC = () => {
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [filterPriority, setFilterPriority] = useState<string>('ALL');
+  const [actions, setActions] = useState<ComplianceAction[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Centre response form state
   const [centreExplanation, setCentreExplanation] = useState<string>('');
@@ -36,8 +41,35 @@ export const ActionsView: React.FC = () => {
   // New comment state
   const [newCommentText, setNewCommentText] = useState<string>('');
 
-  const actions = appState.actions;
   const currentUser = appState.currentUser;
+  const isCentreRole = currentUser.role === 'CENTRE_ADMIN';
+
+  const fetchActions = async (isInitial = false) => {
+    try {
+      if (isInitial) setLoading(true);
+      const data = isCentreRole
+        ? await api.getCentreActions()
+        : await api.getActions({ status_filter: filterStatus !== 'ALL' ? filterStatus : undefined });
+      if (Array.isArray(data)) {
+        setActions(data);
+      } else {
+        setActions([]);
+      }
+    } catch (err) {
+      console.error('Failed to fetch actions from MySQL:', err);
+      setActions([]);
+    } finally {
+      if (isInitial) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchActions(true);
+    const interval = setInterval(() => {
+      fetchActions(false);
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [filterStatus, isCentreRole]);
 
   const filteredActions = actions.filter((act) => {
     if (filterStatus !== 'ALL' && act.status !== filterStatus) return false;
@@ -48,66 +80,107 @@ export const ActionsView: React.FC = () => {
   const activeAction = actions.find((a) => a.id === selectedActionId) || filteredActions[0] || null;
 
   // Handlers
-  const handleCentreSubmitResponse = (e: React.FormEvent) => {
+  const handleCentreSubmitResponse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeAction || !centreExplanation) return;
-    appState.submitCentreResponse(activeAction.id, {
-      explanation: centreExplanation,
-      proofDocumentName: proofDocName,
-      proofPhotoUrl: 'https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=800&q=80',
-    });
-    setCentreExplanation('');
+    setIsSubmitting(true);
+    try {
+      await api.submitActionResponse(activeAction.id, {
+        explanation: centreExplanation,
+        proof_document_name: proofDocName,
+      });
+      await fetchActions();
+      setCentreExplanation('');
+    } catch (err: any) {
+      console.error('Failed to submit response to MySQL:', err);
+      alert(err.message || 'Failed to submit response');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOfficerApprove = () => {
+  const handleOfficerApprove = async () => {
     if (!activeAction) return;
-    appState.verifyAction(
-      activeAction.id,
-      'APPROVED',
-      verificationRemarks || 'Satisfactory explanation & authentic OEM service challan verified.'
-    );
-    setVerificationRemarks('');
+    setIsSubmitting(true);
+    try {
+      await api.verifyAction(activeAction.id, {
+        outcome: 'APPROVED',
+        mandatory_remarks: verificationRemarks || 'Satisfactory explanation & authentic OEM service challan verified.',
+      });
+      await fetchActions();
+      setVerificationRemarks('');
+    } catch (err: any) {
+      console.error('Failed to verify action in MySQL:', err);
+      alert(err.message || 'Failed to verify action');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOfficerReject = () => {
+  const handleOfficerReject = async () => {
     if (!activeAction) return;
     if (!rejectionReason) {
       alert('Mandatory rejection reason is required to reject a submission.');
       return;
     }
-    appState.verifyAction(activeAction.id, 'REJECTED', rejectionReason);
-    setRejectionReason('');
-    setShowRejectInput(false);
+    setIsSubmitting(true);
+    try {
+      await api.verifyAction(activeAction.id, {
+        outcome: 'REJECTED',
+        mandatory_remarks: rejectionReason,
+      });
+      await fetchActions();
+      setRejectionReason('');
+      setShowRejectInput(false);
+    } catch (err: any) {
+      console.error('Failed to reject action in MySQL:', err);
+      alert(err.message || 'Failed to reject action');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleOfficerReinspection = () => {
+  const handleOfficerReinspection = async () => {
     if (!activeAction) return;
-    appState.verifyAction(
-      activeAction.id,
-      'REINSPECTION_ORDERED',
-      'On-site physical audit scheduled for independent mechanical validation.'
-    );
+    setIsSubmitting(true);
+    try {
+      await api.verifyAction(activeAction.id, {
+        outcome: 'REINSPECTION_REQUESTED',
+        mandatory_remarks: 'On-site physical audit scheduled for independent mechanical validation.',
+      });
+      await fetchActions();
+    } catch (err: any) {
+      console.error('Failed to request reinspection in MySQL:', err);
+      alert(err.message || 'Failed to request reinspection');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleEscalate = () => {
     if (!activeAction) return;
-    appState.escalateAction(
-      activeAction.id,
-      'Action exceeded allowable turnaround window. Escalated to District Vigilance Officer.'
+    setActions((prev) =>
+      prev.map((a) =>
+        a.id === activeAction.id
+          ? { ...a, status: 'ESCALATED', isOverdue: true }
+          : a
+      )
     );
   };
 
   const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeAction || !newCommentText) return;
-    activeAction.comments.push({
+    const commentsList = (activeAction as any).comments || [];
+    commentsList.push({
       id: `cmt_${Date.now()}`,
       authorName: currentUser.name,
       authorRole: currentUser.role,
       text: newCommentText,
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
     });
-    appState.saveState();
+    (activeAction as any).comments = commentsList;
+    setActions([...actions]);
     setNewCommentText('');
   };
 
@@ -171,7 +244,13 @@ export const ActionsView: React.FC = () => {
             <span>Due Date</span>
           </div>
 
-          <div className="space-y-2.5 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
+          {loading ? (
+            <div className="p-8 text-center bg-white rounded-xl border border-slate-200">
+              <Loader2 className="w-6 h-6 animate-spin text-indigo-600 mx-auto mb-2" />
+              <p className="text-xs text-slate-500">Querying MySQL Action Records...</p>
+            </div>
+          ) : (
+            <div className="space-y-2.5 max-h-[calc(100vh-280px)] overflow-y-auto pr-1">
             {filteredActions.map((act) => {
               const isSelected = activeAction?.id === act.id;
               const isOverdue = act.isOverdue || act.status === 'ESCALATED';
@@ -192,7 +271,7 @@ export const ActionsView: React.FC = () => {
                       className={`text-[9px] font-bold px-2 py-0.5 rounded ${
                         act.status === 'RESOLVED'
                           ? 'bg-emerald-100 text-emerald-800'
-                          : act.status === 'SUBMITTED_FOR_VERIFICATION'
+                          : act.status === 'SUBMITTED'
                           ? 'bg-sky-100 text-sky-800'
                           : isOverdue
                           ? 'bg-rose-100 text-rose-800'
@@ -225,6 +304,7 @@ export const ActionsView: React.FC = () => {
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Right Column (7 cols): Selected Action Deep-Dive & Dual-Perspective Workflow */}
@@ -242,7 +322,7 @@ export const ActionsView: React.FC = () => {
                       className={`text-[10px] font-bold px-2 py-0.5 rounded ${
                         activeAction.status === 'RESOLVED'
                           ? 'bg-emerald-100 text-emerald-800'
-                          : activeAction.status === 'SUBMITTED_FOR_VERIFICATION'
+                          : activeAction.status === 'SUBMITTED'
                           ? 'bg-sky-100 text-sky-800'
                           : activeAction.isOverdue
                           ? 'bg-rose-100 text-rose-800'
@@ -257,7 +337,7 @@ export const ActionsView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center space-x-2 text-xs">
-                    {activeAction.status !== 'RESOLVED' && (
+                    {!isCentreRole && activeAction.status !== 'RESOLVED' && (
                       <button
                         onClick={handleEscalate}
                         className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold rounded-lg text-xs border border-rose-200 flex items-center gap-1 transition-colors"
@@ -388,6 +468,13 @@ export const ActionsView: React.FC = () => {
                       Verified By: {activeAction.verification.verifiedBy}
                     </span>
                   </div>
+                ) : isCentreRole ? (
+                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
+                    <span className="font-semibold block text-slate-800">Verification Pending by Government Officer</span>
+                    <p className="text-[11px] text-slate-500 mt-0.5">
+                      Once your explanation and evidence are submitted, the assigned Monitoring Officer ({activeAction.assignedOfficerName}) will review the proof and issue an official verification determination.
+                    </p>
+                  </div>
                 ) : (
                   <div className="space-y-3">
                     <p className="text-xs text-slate-500">
@@ -417,7 +504,7 @@ export const ActionsView: React.FC = () => {
                         <button
                           type="button"
                           onClick={handleOfficerReject}
-                          className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded"
+                          className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded"
                         >
                           Confirm Rejection & Reopen Action
                         </button>
