@@ -34,9 +34,13 @@ except Exception as e:
     print(f"[Database Init] Table auto-creation notice: {e}")
 
 # CORS Middleware
+# CORS Middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://skillguardai.vercel.app",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
