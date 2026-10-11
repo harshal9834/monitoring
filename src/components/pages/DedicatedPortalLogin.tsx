@@ -18,7 +18,6 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
   onRegisterCentre,
   onRequestGovAccess,
 }) => {
-  const [centreId, setCentreId] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(true);
@@ -63,9 +62,6 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
         password,
         portal_type: portalType
       };
-      if (portalType === 'centre' && centreId.trim()) {
-        payload.centre_id = centreId.trim();
-      }
 
       const res = await fetch(`${API_BASE}/auth/login`, {
         method: 'POST',
@@ -197,24 +193,6 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
 
           {!showForgot ? (
             <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-              {portalType === 'centre' && (
-                <div>
-                  <label className="font-semibold text-slate-700 block mb-1">
-                    Centre ID <span className="text-slate-400 font-normal">(Optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={centreId}
-                    onChange={(e) => setCentreId(e.target.value)}
-                    placeholder="e.g. DEMO-TC-0001 or MH-PUN-TC-0001"
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white"
-                  />
-                  <span className="text-[10px] text-slate-400 mt-0.5 block">
-                    Statutory ID assigned by Administration Directorate (Auto-verified from your account)
-                  </span>
-                </div>
-              )}
-
               <div>
                 <label className="font-semibold text-slate-700 block mb-1">
                   {portalType === 'government'

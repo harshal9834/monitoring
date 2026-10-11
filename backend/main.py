@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
-from backend.database import engine, Base, get_db
+from backend.database import engine, Base, get_db, safe_init_db_schema
 from backend.routers import auth_router, government_router, centre_router, admin_router, video_router, submissions_router
 
 app = FastAPI(
@@ -26,21 +26,28 @@ os.makedirs("storage/cloud_media", exist_ok=True)
 # Mount local storage as static files for snapshots and temporary caching
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
 
-# Auto-create tables on startup if they don't exist
-try:
-    from backend.models import models
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"[Database Init] Table auto-creation notice: {e}")
+# Production-safe database schema check & initialization
+safe_init_db_schema()
 
-# CORS Middleware
-# CORS Middleware
+# CORS Middleware (Explicit origins for production security)
+raw_origins = os.getenv("CORS_ORIGINS", "")
+allowed_origins = [
+    "https://skillguardai.vercel.app",
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+if raw_origins:
+    for o in raw_origins.split(","):
+        clean_origin = o.strip()
+        if clean_origin and clean_origin not in allowed_origins:
+            allowed_origins.append(clean_origin)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://skillguardai.vercel.app",
-        "http://localhost:5173",
-    ],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -82,6 +89,7 @@ def stream_media_by_public_id(
     # Proxy from Cloudinary CDN if remote
     cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME", "djdieezso")
     is_video = "videos" in clean_id or clean_id.endswith((".mp4", ".mov", ".webm"))
+    rtype = "video" if is_video else "image"
     trans = "vc_h264/" if is_video else ""
     remote_url = f"https://res.cloudinary.com/{cloud_name}/{rtype}/upload/{trans}{clean_id}"
     import urllib.request
@@ -94,13 +102,22 @@ def stream_media_by_public_id(
 
     raise HTTPException(status_code=404, detail=f"Media asset '{public_id}' not found")
 
-# Health Check
+# Health Check (Live TiDB / MySQL Connectivity Ping)
 @app.get("/api/health")
 def health_check(db: Session = Depends(get_db)):
+    from sqlalchemy import text
+    try:
+        db.execute(text("SELECT 1"))
+        db_status = "Connected"
+        status_label = "HEALTHY"
+    except Exception as e:
+        db_status = f"Disconnected ({str(e)})"
+        status_label = "DEGRADED"
+
     return {
-        "status": "HEALTHY",
+        "status": status_label,
         "service": "SkillGuard AI Enterprise Platform",
-        "database": "MySQL 8.0+ Connected (sih245)",
+        "database": f"MySQL 8.0+ {db_status}",
         "inference_engine": "Ultralytics YOLOv8m (15fps Active)",
         "version": "2.4.0"
     }
