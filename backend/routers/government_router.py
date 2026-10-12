@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, or_
 from datetime import datetime, timedelta
@@ -631,9 +631,200 @@ def debug_ai_analysis_route(
     }
 
 
+def run_ai_analysis_background(submission_id: str, centre_id: str):
+    """
+    Dedicated background worker that runs the YOLO neural inference pipeline,
+    updates VideoJob progress, records AttendanceAIResult and Alert in MySQL/TiDB,
+    and cleans up temporary media files.
+    """
+    from backend.database import SessionLocal
+    from backend.services.video_service import process_video_pipeline, process_image_pipeline
+    from backend.services.cloudinary_service import download_temp_media_file
+
+    db = SessionLocal()
+    temp_video_file = None
+    temp_image_file = None
+    try:
+        sub = db.query(AttendanceSubmission).filter(AttendanceSubmission.id == submission_id).first()
+        if not sub:
+            return
+
+        job = db.query(VideoJob).filter(VideoJob.submission_id == sub.id).first()
+        video = db.query(Video).filter(Video.id == sub.video_id).first() if sub.video_id else None
+
+        media_records = db.query(SubmissionMedia).filter(
+            SubmissionMedia.submission_id == sub.id,
+            SubmissionMedia.center_id == sub.centre_id
+        ).all()
+        video_media = next((m for m in media_records if m.media_type == "VIDEO"), None)
+        image_media = next((m for m in media_records if m.media_type == "IMAGE"), None)
+
+        has_video = bool(video_media or sub.video_id or sub.video_path)
+        has_image = bool(image_media or sub.image_path)
+
+        video_analysis_data = None
+        image_analysis_data = None
+
+        if has_video:
+            video_target = ""
+            if video_media and (video_media.secure_url or video_media.cloudinary_url):
+                video_target = video_media.secure_url or video_media.cloudinary_url
+            elif video and video.file_path:
+                video_target = video.file_path
+            elif sub.video_path:
+                video_target = sub.video_path
+
+            video_local_path = None
+            if video_target.startswith("http://") or video_target.startswith("https://"):
+                try:
+                    temp_video_file = download_temp_media_file(video_target, suffix=".mp4")
+                    video_local_path = temp_video_file
+                except Exception as ex:
+                    print(f"[Warning] Could not download remote video for AI processing: {ex}")
+            else:
+                clean_rel = video_target.lstrip("/storage/").replace("storage/", "")
+                potential_path = os.path.join("storage", clean_rel)
+                if os.path.exists(potential_path):
+                    video_local_path = potential_path
+
+            if video_local_path and os.path.exists(video_local_path):
+                # Sample up to 12 frames at 1 fps for optimal CPU latency on cloud container
+                video_analysis_data = process_video_pipeline(video_local_path, sub.centre_id, db, sample_fps=1, max_sampled_frames=12)
+                if job:
+                    job.analysis_results = video_analysis_data
+                    job.progress_percentage = 80
+                    db.commit()
+
+        if has_image:
+            image_target = ""
+            if image_media and (image_media.secure_url or image_media.cloudinary_url):
+                image_target = image_media.secure_url or image_media.cloudinary_url
+            elif sub.image_path:
+                image_target = sub.image_path
+
+            img_local_path = None
+            if image_target.startswith("http://") or image_target.startswith("https://"):
+                try:
+                    temp_image_file = download_temp_media_file(image_target, suffix=".jpg")
+                    img_local_path = temp_image_file
+                except Exception as ex:
+                    print(f"[Warning] Could not download remote image for AI processing: {ex}")
+            else:
+                clean_img_rel = image_target.lstrip("/storage/").replace("storage/", "")
+                potential_img = os.path.join("storage", clean_img_rel)
+                if os.path.exists(potential_img):
+                    img_local_path = potential_img
+
+            if img_local_path and os.path.exists(img_local_path):
+                image_analysis_data = process_image_pipeline(img_local_path, sub.centre_id, db)
+                sub.image_ai_result_json = image_analysis_data
+
+        primary_analysis = video_analysis_data or image_analysis_data
+        if video_analysis_data and image_analysis_data:
+            primary_analysis = {
+                **video_analysis_data,
+                "video_analysis": video_analysis_data,
+                "image_analysis": image_analysis_data,
+                "combined_mode": True
+            }
+        if job and primary_analysis:
+            job.analysis_results = primary_analysis
+
+        if job:
+            job.status = "COMPLETED"
+            job.progress_percentage = 100
+            job.completed_at = datetime.utcnow()
+
+        est = primary_analysis.get("estimated_presence", sub.total_present) if primary_analysis else (sub.total_present or 40)
+        variance = max(0, (sub.total_present or 40) - est)
+        variance_pct = round((variance / max(sub.total_present or 40, 1)) * 100, 1)
+
+        ai_res = db.query(AttendanceAIResult).filter(AttendanceAIResult.attendance_submission_id == sub.id).first()
+        if not ai_res:
+            ai_res = AttendanceAIResult(
+                attendance_submission_id=sub.id,
+                video_id=video.id if video else None,
+                model_version_id="v1.4.0",
+                estimated_people=est,
+                confidence=0.942,
+                variance_count=variance,
+                variance_percentage=variance_pct,
+                status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH")
+            )
+            db.add(ai_res)
+        else:
+            ai_res.estimated_people = est
+            ai_res.variance_count = variance
+            ai_res.variance_percentage = variance_pct
+            ai_res.status = "CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH")
+
+        sub.ai_status = "COMPLETED"
+        sub.ai_completed_at = datetime.utcnow()
+        sub.ai_detected_people = est
+        sub.ai_result_json = primary_analysis
+
+        if variance_pct >= 10.0:
+            sub.status = "DISCREPANCY_CRITICAL"
+            existing_alert = db.query(Alert).filter(Alert.centre_id == sub.centre_id, Alert.status != "RESOLVED").first()
+            if not existing_alert:
+                alert_id = f"alt_{int(datetime.utcnow().timestamp())}"
+                new_alert = Alert(
+                    id=alert_id,
+                    centre_id=sub.centre_id,
+                    video_id=video.id if video else None,
+                    category="ATTENDANCE_MISMATCH",
+                    severity="CRITICAL",
+                    title=f"Attendance Variance ({est} Detected vs {sub.total_present} Claimed)",
+                    description=f"YOLO vision pipeline detected {est} trainees in submitted classroom media vs {sub.total_present} reported on daily roster (Variance: {variance_pct}%).",
+                    detected_time=datetime.utcnow().strftime("%I:%M %p"),
+                    ai_confidence=0.94,
+                    submitted_value=sub.total_present or 40,
+                    ai_value=est,
+                    variance=variance,
+                    status="NEW"
+                )
+                db.add(new_alert)
+                db.add(AlertEvidence(
+                    alert_id=alert_id,
+                    snapshot_url=sub.image_path or "/static/videos/classroom_sample.mp4",
+                    detected_count=est,
+                    expected_count=sub.total_present or 40,
+                    confidence=0.94,
+                    model_version="v1.4.0"
+                ))
+        else:
+            sub.status = "VERIFIED"
+
+        db.commit()
+        print(f"[AI ANALYSIS BACKGROUND COMPLETED] submission_id={submission_id} est={est} variance={variance_pct}%", flush=True)
+
+    except Exception as exc:
+        db.rollback()
+        print(f"[AI ANALYSIS BACKGROUND ERROR]: {exc}", flush=True)
+        try:
+            if job:
+                job.status = "FAILED"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        if temp_video_file and os.path.exists(temp_video_file):
+            try:
+                os.remove(temp_video_file)
+            except Exception:
+                pass
+        if temp_image_file and os.path.exists(temp_image_file):
+            try:
+                os.remove(temp_image_file)
+            except Exception:
+                pass
+        db.close()
+
+
 @router.post("/submissions/{submission_id}/analyze")
 def trigger_submission_ai_analysis(
     submission_id: str,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(require_roles(["GOVERNMENT_ADMIN", "MONITORING_OFFICER", "SUPER_ADMIN"])),
     db: Session = Depends(get_db)
 ):
@@ -674,13 +865,12 @@ def trigger_submission_ai_analysis(
 
     video = db.query(Video).filter(Video.id == sub.video_id).first() if sub.video_id else None
 
-    # Find or create VideoJob for video or media tracking
+    # Find or create VideoJob for tracking
     job = db.query(VideoJob).filter(VideoJob.submission_id == sub.id).first()
     if not job and video:
         job = db.query(VideoJob).filter(VideoJob.video_id == video.id).first()
 
     if not job:
-        # If no video record exists (e.g. image-only submission), create Media/Video record to satisfy foreign key
         if not video:
             dummy_vid_id = f"med_{sub.id.replace('-', '_').lower()}"
             video = Video(
@@ -707,183 +897,24 @@ def trigger_submission_ai_analysis(
             created_at=datetime.utcnow()
         )
         db.add(job)
-        db.commit()
 
-    from backend.services.video_service import process_video_pipeline, process_image_pipeline
-    from backend.services.cloudinary_service import download_temp_media_file
+    # Set submission and job to processing
+    sub.ai_status = "PROCESSING"
+    job.status = "PROCESSING"
+    job.progress_percentage = 25
+    db.commit()
 
-    video_analysis_data = None
-    image_analysis_data = None
-
-    temp_video_file = None
-    temp_image_file = None
-
-    try:
-        # 1. Process Video if present
-        if has_video:
-            video_target = ""
-            if video_media and (video_media.secure_url or video_media.cloudinary_url):
-                video_target = video_media.secure_url or video_media.cloudinary_url
-            elif video and video.file_path:
-                video_target = video.file_path
-            elif sub.video_path:
-                video_target = sub.video_path
-
-            video_local_path = None
-
-            if video_target.startswith("http://") or video_target.startswith("https://"):
-                try:
-                    temp_video_file = download_temp_media_file(video_target, suffix=".mp4")
-                    video_local_path = temp_video_file
-                except Exception as ex:
-                    print(f"[Warning] Could not download remote video for AI processing: {ex}")
-            else:
-                clean_rel = video_target.lstrip("/storage/").replace("storage/", "")
-                potential_path = os.path.join("storage", clean_rel)
-                if os.path.exists(potential_path):
-                    video_local_path = potential_path
-
-            if video_local_path and os.path.exists(video_local_path):
-                video_analysis_data = process_video_pipeline(video_local_path, sub.centre_id, db)
-                job.analysis_results = video_analysis_data
-
-        # 2. Process Image if present
-        if has_image:
-            image_target = ""
-            if image_media and (image_media.secure_url or image_media.cloudinary_url):
-                image_target = image_media.secure_url or image_media.cloudinary_url
-            elif sub.image_path:
-                image_target = sub.image_path
-
-            img_local_path = None
-
-            if image_target.startswith("http://") or image_target.startswith("https://"):
-                try:
-                    temp_image_file = download_temp_media_file(image_target, suffix=".jpg")
-                    img_local_path = temp_image_file
-                except Exception as ex:
-                    print(f"[Warning] Could not download remote image for AI processing: {ex}")
-            else:
-                clean_img_rel = image_target.lstrip("/storage/").replace("storage/", "")
-                potential_img = os.path.join("storage", clean_img_rel)
-                if os.path.exists(potential_img):
-                    img_local_path = potential_img
-
-            if img_local_path and os.path.exists(img_local_path):
-                image_analysis_data = process_image_pipeline(img_local_path, sub.centre_id, db)
-                sub.image_ai_result_json = image_analysis_data
-    finally:
-        if temp_video_file and os.path.exists(temp_video_file):
-            try:
-                os.remove(temp_video_file)
-            except Exception:
-                pass
-        if temp_image_file and os.path.exists(temp_image_file):
-            try:
-                os.remove(temp_image_file)
-            except Exception:
-                pass
-
-    # Combined / primary analysis resolution
-    primary_analysis = video_analysis_data or image_analysis_data
-    if video_analysis_data and image_analysis_data:
-        # Both exist: combine summaries
-        job.analysis_results = {
-            **video_analysis_data,
-            "video_analysis": video_analysis_data,
-            "image_analysis": image_analysis_data,
-            "combined_mode": True
-        }
-        primary_analysis = job.analysis_results
-    elif image_analysis_data and not video_analysis_data:
-        job.analysis_results = image_analysis_data
-
-    job.status = "COMPLETED"
-    job.progress_percentage = 100
-    job.completed_at = datetime.utcnow()
-
-    # Calculate estimated people and discrepancy
-    est = primary_analysis.get("estimated_presence", sub.total_present) if primary_analysis else (sub.total_present or 40)
-    variance = max(0, (sub.total_present or 40) - est)
-    variance_pct = round((variance / max(sub.total_present or 40, 1)) * 100, 1)
-
-    ai_res = db.query(AttendanceAIResult).filter(AttendanceAIResult.attendance_submission_id == sub.id).first()
-    if not ai_res:
-        ai_res = AttendanceAIResult(
-            attendance_submission_id=sub.id,
-            video_id=video.id if video else None,
-            model_version_id="v1.4.0",
-            estimated_people=est,
-            confidence=0.942,
-            variance_count=variance,
-            variance_percentage=variance_pct,
-            status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH")
-        )
-        db.add(ai_res)
-    else:
-        ai_res.estimated_people = est
-        ai_res.variance_count = variance
-        ai_res.variance_percentage = variance_pct
-        ai_res.status = "CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH")
-
-    sub.ai_status = "COMPLETED"
-    sub.ai_completed_at = datetime.utcnow()
-    sub.ai_detected_people = est
-    sub.ai_result_json = primary_analysis
-
-    # If variance is critical, auto mark submission status and file Alert
-    if variance_pct >= 10.0:
-        sub.status = "DISCREPANCY_CRITICAL"
-        existing_alert = db.query(Alert).filter(Alert.centre_id == sub.centre_id, Alert.status != "RESOLVED").first()
-        if not existing_alert:
-            centre = db.query(TrainingCentre).filter(TrainingCentre.id == sub.centre_id).first()
-            alert_id = f"alt_{int(datetime.utcnow().timestamp())}"
-            new_alert = Alert(
-                id=alert_id,
-                centre_id=sub.centre_id,
-                video_id=video.id if video else None,
-                category="ATTENDANCE_MISMATCH",
-                severity="CRITICAL",
-                title=f"Attendance Variance ({est} Detected vs {sub.total_present} Claimed)",
-                description=f"YOLO vision pipeline detected {est} trainees in submitted classroom media vs {sub.total_present} reported on daily roster (Variance: {variance_pct}%).",
-                detected_time=datetime.utcnow().strftime("%I:%M %p"),
-                ai_confidence=0.94,
-                submitted_value=sub.total_present or 40,
-                ai_value=est,
-                variance=variance,
-                status="NEW"
-            )
-            db.add(new_alert)
-            db.add(AlertEvidence(
-                alert_id=alert_id,
-                snapshot_url=sub.image_path or "/static/videos/classroom_sample.mp4",
-                detected_count=est,
-                expected_count=sub.total_present or 40,
-                confidence=0.94,
-                model_version="v1.4.0"
-            ))
-    else:
-        sub.status = "VERIFIED"
-
-    try:
-        db.commit()
-    except Exception as db_err:
-        db.rollback()
-        print(f"[AI ANALYSIS COMMIT ERROR]: {db_err}", flush=True)
-        raise HTTPException(status_code=500, detail="Database commit failed during AI analysis")
+    # Launch inference in background task so HTTP request returns immediately
+    background_tasks.add_task(run_ai_analysis_background, sub.id, sub.centre_id)
 
     return {
         "success": True,
         "submissionId": sub.id,
         "jobId": job.id,
-        "status": "COMPLETED",
+        "status": "PROCESSING",
         "hasVideo": has_video,
         "hasImage": has_image,
-        "estimatedAttendance": est,
-        "reportedAttendance": sub.total_present,
-        "variance": variance,
-        "variancePercentage": variance_pct,
-        "message": "AI media analysis completed successfully using trained YOLO vision pipeline."
+        "message": "AI media analysis pipeline launched successfully. Inference in progress."
     }
 
 @router.delete("/submissions/{submission_id}")

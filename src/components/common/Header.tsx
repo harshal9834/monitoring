@@ -113,10 +113,14 @@ export const Header: React.FC<HeaderProps> = ({
   }, [currentUser.role]);
 
   useEffect(() => {
+    // Only query government-restricted alerts and actions if authenticated user holds government or super admin roles
+    const isGov = currentUser.role === 'GOVERNMENT_ADMIN' || currentUser.role === 'MONITORING_OFFICER' || currentUser.role === 'SUPER_ADMIN';
+    if (!isGov) return;
+
     api.getCentres().then((data: any) => { if (Array.isArray(data)) setSearchCentres(data); }).catch(() => {});
     api.getAlerts().then((data: any) => { if (Array.isArray(data)) setSearchAlerts(data); }).catch(() => {});
     api.getActions().then((data: any) => { if (Array.isArray(data)) setSearchActions(data); }).catch(() => {});
-  }, []);
+  }, [currentUser.role]);
 
   // Section 54: Global Search across Centres, Alerts, Actions
   const searchResults = searchQuery.trim()

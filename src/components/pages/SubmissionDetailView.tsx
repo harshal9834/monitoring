@@ -142,16 +142,51 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
 
     try {
       const res = await api.triggerSubmissionAIAnalysis(submissionId);
-      if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
-      setAnalysisProgress(100);
-      setAnalysisMessage('AI Inference Completed! Opening visual analysis review...');
-      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
-      redirectTimerRef.current = setTimeout(() => {
-        setIsAnalyzing(false);
-        fetchDetail();
-        // Redirect directly to AI Analysis screen for this submission via React state
-        onNavigate('ai_analysis', res.submissionId || submissionId);
-      }, 1000);
+      setAnalysisMessage('YOLOv8 neural inference running in background...');
+
+      // If backend returns COMPLETED immediately (e.g. cached or fast image), finish
+      if (res.status === 'COMPLETED') {
+        if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
+        setAnalysisProgress(100);
+        setAnalysisMessage('AI Inference Completed! Opening visual analysis review...');
+        if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = setTimeout(() => {
+          setIsAnalyzing(false);
+          fetchDetail();
+          onNavigate('ai_analysis', res.submissionId || submissionId);
+        }, 800);
+        return;
+      }
+
+      // If PROCESSING, poll getSubmissionDetail until aiResult.status is COMPLETED or max 45s
+      const startTime = Date.now();
+      const pollInterval = setInterval(async () => {
+        try {
+          const updatedDetail = await api.getSubmissionDetail(submissionId);
+          if (updatedDetail?.aiResult?.status === 'COMPLETED' || updatedDetail?.aiStatus === 'COMPLETED') {
+            clearInterval(pollInterval);
+            if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
+            setAnalysisProgress(100);
+            setAnalysisMessage('AI Analysis Complete! Opening visual analysis review...');
+            setDetail(updatedDetail);
+            if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+            redirectTimerRef.current = setTimeout(() => {
+              setIsAnalyzing(false);
+              onNavigate('ai_analysis', submissionId);
+            }, 800);
+          } else if (Date.now() - startTime > 45000) {
+            // Timeout after 45s: stop spinner and navigate to AI analysis view anyway
+            clearInterval(pollInterval);
+            if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
+            setIsAnalyzing(false);
+            fetchDetail();
+            onNavigate('ai_analysis', submissionId);
+          }
+        } catch {
+          // ignore transient poll error
+        }
+      }, 2500);
+
     } catch (err: any) {
       if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
       setIsAnalyzing(false);
