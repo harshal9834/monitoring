@@ -26,7 +26,7 @@ import {
   FileImage,
   Image
 } from 'lucide-react';
-import { api, getAuthToken, formatVideoUrl } from '../../services/api';
+import { api, getAuthToken, formatVideoUrl, API_BASE } from '../../services/api';
 import { NavTab } from '../common/Sidebar';
 
 interface AIAnalysisViewProps {
@@ -81,9 +81,9 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
     console.warn('Image failed to load from URL:', currentImageSrc);
     const token = getAuthToken() || '';
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-    const fallback = analysisData?.image?.fallbackUrl || (analysisData?.submissionId ? `/api/submissions/${analysisData.submissionId}/media/stream?type=image` : null);
+    const fallback = analysisData?.image?.fallbackUrl || (analysisData?.submissionId ? `${API_BASE}/submissions/${analysisData.submissionId}/media/stream?type=image` : null);
 
-    if (fallback && !currentImageSrc.includes('/api/submissions/')) {
+    if (fallback && (!currentImageSrc.includes('/submissions/') || !currentImageSrc.includes('/media/stream'))) {
       console.info('Attempting fallback stream for image...');
       setCurrentImageSrc(`${fallback}${tokenParam}`);
     } else {
@@ -97,7 +97,7 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
     setImageLoaded(false);
     const token = getAuthToken() || '';
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const fallback = analysisData?.image?.fallbackUrl || (analysisData?.submissionId ? `/api/submissions/${analysisData.submissionId}/media/stream?type=image` : null);
+    const fallback = analysisData?.image?.fallbackUrl || (analysisData?.submissionId ? `${API_BASE}/submissions/${analysisData.submissionId}/media/stream?type=image` : null);
     if (fallback) {
       setCurrentImageSrc(`${fallback}${tokenParam}`);
     } else if (analysisData?.image?.url) {
@@ -109,9 +109,9 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
     console.warn('Video failed to load from URL:', currentVideoSrc);
     const token = getAuthToken() || '';
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-    const fallback = analysisData?.video?.fallbackUrl || (analysisData?.submissionId ? `/api/submissions/${analysisData.submissionId}/media/stream?type=video` : null);
+    const fallback = analysisData?.video?.fallbackUrl || (analysisData?.submissionId ? `${API_BASE}/submissions/${analysisData.submissionId}/media/stream?type=video` : null);
 
-    if (fallback && !currentVideoSrc.includes('/api/submissions/')) {
+    if (fallback && (!currentVideoSrc.includes('/submissions/') || !currentVideoSrc.includes('/media/stream'))) {
       console.info('Attempting fallback stream for video...');
       setCurrentVideoSrc(`${fallback}${tokenParam}`);
     } else {
@@ -123,7 +123,7 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
     setVideoError(false);
     const token = getAuthToken() || '';
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const fallback = analysisData?.video?.fallbackUrl || (analysisData?.submissionId ? `/api/submissions/${analysisData.submissionId}/media/stream?type=video` : null);
+    const fallback = analysisData?.video?.fallbackUrl || (analysisData?.submissionId ? `${API_BASE}/submissions/${analysisData.submissionId}/media/stream?type=video` : null);
     if (fallback) {
       setCurrentVideoSrc(`${fallback}${tokenParam}`);
     } else if (analysisData?.video?.url) {

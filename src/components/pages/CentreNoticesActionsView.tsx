@@ -78,12 +78,15 @@ export const CentreNoticesActionsView: React.FC = () => {
     setSuccessMessage(null);
 
     try {
+      console.log('[NOTICE RESPONSE] Submitting response for notice:', selectedNotice.id, 'with file:', proofFile?.name || 'none');
       if (proofFile) {
         const formData = new FormData();
         formData.append('explanation', explanation.trim());
         formData.append('proof_file', proofFile);
+        console.log('[NOTICE RESPONSE] Calling uploadNoticeResponseMultipart via API client');
         await api.uploadNoticeResponseMultipart(selectedNotice.id, formData);
       } else {
+        console.log('[NOTICE RESPONSE] Calling submitNoticeResponse via API client');
         await api.submitNoticeResponse(selectedNotice.id, {
           explanation: explanation.trim(),
           proof_document_name: selectedNotice.response?.proofDocumentName || 'Explanation_Note.pdf',
@@ -100,7 +103,10 @@ export const CentreNoticesActionsView: React.FC = () => {
         setSelectedNotice(refreshedNotice);
       }
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to submit notice response.');
+      console.error('[NOTICE RESPONSE] Error submitting notice response:', err);
+      const isFileError = Boolean(proofFile);
+      const msg = err.message || (isFileError ? 'Failed to upload supporting proof document.' : 'Failed to submit notice response.');
+      setErrorMessage(msg);
     } finally {
       setIsSubmitting(false);
     }

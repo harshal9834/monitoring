@@ -1,9 +1,13 @@
 // SkillGuard AI API Client
 // Communicates with FastAPI backend connected to MySQL 8.0+
 
+const DEFAULT_PROD_API = 'https://monitoring-8yp9.onrender.com/api';
+
 export const API_BASE = (import.meta.env.VITE_API_URL
   ? `${(import.meta.env.VITE_API_URL as string).replace(/\/$/, '')}/api`
-  : '/api');
+  : (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+      ? DEFAULT_PROD_API
+      : (import.meta.env.PROD ? DEFAULT_PROD_API : '/api')));
 
 export function getAuthToken(): string | null {
   return localStorage.getItem('skillguard_token');

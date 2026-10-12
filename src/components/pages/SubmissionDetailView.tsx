@@ -22,7 +22,7 @@ import {
   ChevronRight,
   Image as ImageIcon
 } from 'lucide-react';
-import { api, getAuthToken, formatVideoUrl } from '../../services/api';
+import { api, getAuthToken, formatVideoUrl, API_BASE } from '../../services/api';
 import { NavTab } from '../common/Sidebar';
 
 interface SubmissionDetailViewProps {
@@ -72,8 +72,8 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
   const handleImageError = () => {
     const token = getAuthToken() || '';
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-    const fallback = `/api/submissions/${submissionId}/media/stream?type=image`;
-    if (!imgSrc.includes('/api/submissions/')) {
+    const fallback = `${API_BASE}/submissions/${submissionId}/media/stream?type=image`;
+    if (!imgSrc.includes('/submissions/') || !imgSrc.includes('/media/stream')) {
       setImgSrc(`${fallback}${tokenParam}`);
     } else {
       setImageError(true);
@@ -83,8 +83,8 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
   const handleVideoError = () => {
     const token = getAuthToken() || '';
     const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
-    const fallback = `/api/submissions/${submissionId}/media/stream?type=video`;
-    if (!vidSrc.includes('/api/submissions/')) {
+    const fallback = `${API_BASE}/submissions/${submissionId}/media/stream?type=video`;
+    if (!vidSrc.includes('/submissions/') || !vidSrc.includes('/media/stream')) {
       setVidSrc(`${fallback}${tokenParam}`);
     } else {
       setVideoError(true);
@@ -95,14 +95,14 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
     setImageError(false);
     const token = getAuthToken() || '';
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    setImgSrc(`/api/submissions/${submissionId}/media/stream?type=image${tokenParam}`);
+    setImgSrc(`${API_BASE}/submissions/${submissionId}/media/stream?type=image${tokenParam}`);
   };
 
   const handleRetryVideo = () => {
     setVideoError(false);
     const token = getAuthToken() || '';
     const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    setVidSrc(`/api/submissions/${submissionId}/media/stream?type=video${tokenParam}`);
+    setVidSrc(`${API_BASE}/submissions/${submissionId}/media/stream?type=video${tokenParam}`);
   };
 
   const analysisTimerRef = React.useRef<any>(null);

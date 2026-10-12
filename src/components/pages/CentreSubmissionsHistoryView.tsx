@@ -16,7 +16,7 @@ import {
   Loader2,
   Trash2
 } from 'lucide-react';
-import { api, getAuthToken, formatVideoUrl } from '../../services/api';
+import { api, getAuthToken, formatVideoUrl, API_BASE } from '../../services/api';
 
 interface CentreSubmissionsHistoryViewProps {
   onNavigate: (tab: any) => void;
@@ -428,7 +428,7 @@ export const CentreSubmissionsHistoryView: React.FC<CentreSubmissionsHistoryView
                           formatVideoUrl(
                             (selectedSub.secureUrl || selectedSub.videoUrl || selectedSub.videoPath)?.startsWith('http')
                               ? (selectedSub.secureUrl || selectedSub.videoUrl || selectedSub.videoPath)
-                              : `/api/submissions/${selectedSub.id}/media/stream?type=video`
+                              : `${API_BASE}/submissions/${selectedSub.id}/media/stream?type=video`
                           )
                         }
                         controls
@@ -436,8 +436,8 @@ export const CentreSubmissionsHistoryView: React.FC<CentreSubmissionsHistoryView
                         onError={(e) => {
                           const token = getAuthToken() || '';
                           const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-                          const fallback = `/api/submissions/${selectedSub.id}/media/stream?type=video${tokenParam}`;
-                          if (!e.currentTarget.src.includes('/api/submissions/')) {
+                          const fallback = `${API_BASE}/submissions/${selectedSub.id}/media/stream?type=video${tokenParam}`;
+                          if (!e.currentTarget.src.includes('/submissions/') || !e.currentTarget.src.includes('/media/stream')) {
                             e.currentTarget.src = fallback;
                           }
                         }}
@@ -457,12 +457,12 @@ export const CentreSubmissionsHistoryView: React.FC<CentreSubmissionsHistoryView
                         src={
                           (selectedSub.secureUrl || selectedSub.imageUrl || selectedSub.imagePath)?.startsWith('http')
                             ? (selectedSub.secureUrl || selectedSub.imageUrl || selectedSub.imagePath)
-                            : `/api/submissions/${selectedSub.id}/media/stream?type=image`
+                            : `${API_BASE}/submissions/${selectedSub.id}/media/stream?type=image`
                         }
                         alt="Classroom Evidence"
                         onError={(e) => {
-                          const fallback = `/api/submissions/${selectedSub.id}/media/stream?type=image`;
-                          if (!e.currentTarget.src.includes('/api/submissions/')) {
+                          const fallback = `${API_BASE}/submissions/${selectedSub.id}/media/stream?type=image`;
+                          if (!e.currentTarget.src.includes('/submissions/') || !e.currentTarget.src.includes('/media/stream')) {
                             e.currentTarget.src = fallback;
                           }
                         }}
