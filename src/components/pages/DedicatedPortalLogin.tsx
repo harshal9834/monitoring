@@ -205,7 +205,13 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder={portalType === 'centre' ? 'centre.admin or admin@apexskill.org' : 'name@skillguard.gov.in'}
+                  placeholder={
+                    portalType === 'centre'
+                      ? 'centre@skillguard.ai'
+                      : portalType === 'government'
+                      ? 'government@skillguard.ai'
+                      : 'admin@skillguard.ai'
+                  }
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500 focus:bg-white"
                 />
               </div>

@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   FileText,
   Clock,
+  Sparkles,
 } from 'lucide-react';
 import { appState } from '../../services/storage';
 import { api } from '../../services/api';
@@ -280,6 +281,56 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <p className="text-[10px] text-slate-400 mt-1">
                     *Note: Role is cryptographically verified by backend. Selecting Admin does not grant privileges without valid account verification.
                   </p>
+                </div>
+
+                {/* Dev / Demo Credentials helper */}
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                      <span>Demo Credentials</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (loginRoleOption === 'GOVERNMENT_OFFICER') {
+                          setLoginEmail('government@skillguard.ai');
+                          setLoginPassword('Gov@12345');
+                        } else if (loginRoleOption === 'CENTRE_ADMIN') {
+                          setLoginEmail('centre@skillguard.ai');
+                          setLoginPassword('Centre@12345');
+                        } else {
+                          setLoginEmail('admin@skillguard.ai');
+                          setLoginPassword('Admin@12345');
+                        }
+                      }}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs hover:bg-indigo-50 transition-colors"
+                    >
+                      Auto-Fill
+                    </button>
+                  </div>
+                  <div className="font-mono text-[11px] text-slate-600">
+                    <div>
+                      <span className="text-slate-400">Email: </span>
+                      <span className="font-semibold text-slate-900">
+                        {loginRoleOption === 'GOVERNMENT_OFFICER'
+                          ? 'government@skillguard.ai'
+                          : loginRoleOption === 'CENTRE_ADMIN'
+                          ? 'centre@skillguard.ai'
+                          : 'admin@skillguard.ai'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Password: </span>
+                      <span className="font-semibold text-slate-900">
+                        {loginRoleOption === 'GOVERNMENT_OFFICER'
+                          ? 'Gov@12345'
+                          : loginRoleOption === 'CENTRE_ADMIN'
+                          ? 'Centre@12345'
+                          : 'Admin@12345'}
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
                 <div>

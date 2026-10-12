@@ -12,46 +12,31 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @router.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
-    print("[AUTH LOGIN] Request received", flush=True)
     identifier = (req.email or req.username or "").strip().lower()
-    print(f"[AUTH LOGIN] Email received: {identifier}", flush=True)
+    print(f"[AUTH LOGIN] Email: {identifier}", flush=True)
     if not identifier:
         print("[AUTH LOGIN ERROR] EMAIL_OR_USERNAME_REQUIRED", flush=True)
         raise HTTPException(status_code=400, detail="Email or username is required")
 
-    print("[AUTH LOGIN] Looking up user", flush=True)
     # Search user by email or username
     user = db.query(User).filter(
         (User.email == identifier) | (User.username == identifier)
     ).first()
 
-    print("[AUTH LOGIN] User lookup complete", flush=True)
     print(f"[AUTH LOGIN] User found: {bool(user)}", flush=True)
-
     if not user:
         print("[AUTH LOGIN ERROR] USER_NOT_FOUND", flush=True)
         raise HTTPException(status_code=401, detail="Invalid email/username or password")
 
-    print(f"[AUTH LOGIN] Account status: {user.status}", flush=True)
+    is_active = (user.status == "ACTIVE")
+    print(f"[AUTH LOGIN] Account active: {is_active}", flush=True)
 
-    portal_allowed_passwords = {
-        "government": ["Gov@12345", "Officer@2026", "password123", "Admin@123"],
-        "centre": ["Centre@12345", "Centre@2026", "password123", "Admin@123"],
-        "admin": ["Admin@12345", "SuperAdmin@2026", "password123", "Admin@123"]
-    }
-
-    print("[AUTH LOGIN] Password verification started", flush=True)
     is_valid = verify_password(req.password, user.password_hash)
-    if not is_valid:
-        # Also check standard seeded development portal passwords if hash check didn't match
-        valid_set = portal_allowed_passwords.get(req.portal_type, ["password123"])
-        if req.password in valid_set:
-            is_valid = True
-            # Update user hash in DB to match
-            user.password_hash = hash_password(req.password)
-            db.commit()
+    print(f"[AUTH LOGIN] Password valid: {is_valid}", flush=True)
 
-    print(f"[AUTH LOGIN] Password verification result: {is_valid}", flush=True)
+    role_exists = bool(user.role)
+    print(f"[AUTH LOGIN] Role found: {role_exists}", flush=True)
+
     if not is_valid:
         print("[AUTH LOGIN ERROR] INVALID_PASSWORD", flush=True)
         raise HTTPException(status_code=401, detail="Invalid email/username or password")
