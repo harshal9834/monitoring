@@ -151,8 +151,11 @@ def safe_init_db_schema() -> bool:
         existing_tables = inspector.get_table_names()
         print(f"[Database Init] Existing tables: {existing_tables}", flush=True)
 
-        if "roles" in existing_tables and "users" in existing_tables:
-            print(f"[Database Init] Schema verified: {len(existing_tables)} tables present in database.", flush=True)
+        declared_tables = set(Base.metadata.tables.keys())
+        missing_tables = declared_tables - set(existing_tables)
+
+        if not missing_tables:
+            print(f"[Database Init] Schema verified: all {len(existing_tables)} declared tables present in database.", flush=True)
             db_status_info["initialized"] = True
             db_status_info["last_check_status"] = "connected"
             db_status_info["last_error"] = None
@@ -160,10 +163,10 @@ def safe_init_db_schema() -> bool:
 
         auto_create = os.getenv("AUTO_CREATE_TABLES", "true").lower() in ("true", "1", "yes")
         if auto_create:
-            print("[Database Init] Tables not found. Creating schema...", flush=True)
+            print(f"[Database Init] Missing tables detected: {sorted(list(missing_tables))}. Creating schema...", flush=True)
             from backend.models import models
             Base.metadata.create_all(bind=engine)
-            print("[Database Init] Tables created successfully.", flush=True)
+            print("[Database Init] Schema updated successfully.", flush=True)
             db_status_info["initialized"] = True
             db_status_info["last_check_status"] = "connected"
             db_status_info["last_error"] = None
