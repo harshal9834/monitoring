@@ -95,7 +95,16 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
 
         if frame_idx % frame_interval == 0:
             current_time = round(frame_idx / native_fps, 2) if native_fps > 0 else round(processed_frames / fps_to_use, 2)
-            res = engine.infer_frame(frame)
+            
+            # Keep memory bounded by resizing frame if resolution is oversized
+            fh, fw = frame.shape[:2]
+            if max(fh, fw) > 640:
+                scale = 640.0 / max(fh, fw)
+                infer_frame = cv2.resize(frame, (int(fw * scale), int(fh * scale)))
+            else:
+                infer_frame = frame
+
+            res = engine.infer_frame(infer_frame)
             raw_count = res.get("raw_person_count", 0)
             detections = res.get("detections", [])
             counts = res.get("counts", {})

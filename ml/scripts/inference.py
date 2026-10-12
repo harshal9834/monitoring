@@ -36,13 +36,24 @@ class SkillGuardInferenceEngine:
             model_path = "yolov8n.pt"
 
         print(f"[SkillGuard AI] Loading YOLO Inference Weights from: {model_path}")
+        try:
+            import torch
+            torch.set_num_threads(1)
+        except Exception:
+            pass
         self.model = YOLO(model_path)
         self.classes = ["person"]
         self.unsupported = ["computer", "machine", "workbench", "chair"]
 
     def infer_frame(self, frame_bgr, conf_thresh=0.25):
         h, w = frame_bgr.shape[:2]
-        results = self.model.predict(source=frame_bgr, conf=conf_thresh, verbose=False)
+        try:
+            import torch
+            with torch.no_grad():
+                results = self.model.predict(source=frame_bgr, conf=conf_thresh, imgsz=320, verbose=False)
+        except Exception:
+            results = self.model.predict(source=frame_bgr, conf=conf_thresh, verbose=False)
+
         
         detections = []
         counts = {}

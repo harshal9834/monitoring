@@ -203,23 +203,6 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
         </button>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {hasMedia && !isAICompleted && (
-            <button
-              onClick={handleRunAIAnalysis}
-              disabled={isAnalyzing}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>
-                {isAnalyzing
-                  ? 'Processing AI Pipeline...'
-                  : hasVideo
-                  ? 'Run Video AI Analysis'
-                  : 'Run Image AI Analysis'}
-              </span>
-            </button>
-          )}
-
           {isAICompleted && (
             <button
               onClick={() => onNavigate('ai_analysis', detail.submissionId)}
@@ -230,6 +213,29 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
                 {hasVideo
                   ? 'Open Video AI Analysis →'
                   : 'Open Image AI Analysis →'}
+              </span>
+            </button>
+          )}
+
+          {hasMedia && (
+            <button
+              onClick={handleRunAIAnalysis}
+              disabled={isAnalyzing}
+              className={`px-4 py-2 font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 ${
+                isAICompleted
+                  ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
+                  : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+              } disabled:opacity-50`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>
+                {isAnalyzing
+                  ? 'Processing AI Pipeline...'
+                  : isAICompleted
+                  ? 'Re-run AI Analysis'
+                  : hasVideo
+                  ? 'Run Video AI Analysis'
+                  : 'Run Image AI Analysis'}
               </span>
             </button>
           )}
