@@ -119,7 +119,15 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
   const handleRunAIAnalysis = async () => {
     setIsAnalyzing(true);
     setAnalysisProgress(20);
-    setAnalysisMessage('Loading YOLOv8m neural weights & initializing video decoder...');
+    setAnalysisMessage('Initializing YOLOv8 inference & loading video stream...');
+
+    console.info('[AI ANALYSIS REQUEST]', {
+      method: 'POST',
+      url: `${API_BASE}/government/submissions/${submissionId}/analyze`,
+      submission_id: submissionId,
+      submission_media_id: detail?.video?.id || detail?.image?.id || detail?.mediaList?.[0]?.id || 'N/A',
+      center_id: detail?.centre?.id || detail?.centreId || 'N/A'
+    });
 
     if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
     analysisTimerRef.current = setInterval(() => {
@@ -147,7 +155,9 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
     } catch (err: any) {
       if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
       setIsAnalyzing(false);
-      alert(err.message || 'Failed to trigger AI analysis');
+      const errMsg = err?.message || 'Failed to trigger AI analysis';
+      console.error('[AI ANALYSIS ERROR]', errMsg);
+      alert(errMsg);
     }
   };
 

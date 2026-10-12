@@ -54,17 +54,36 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, {
+      ...options,
+      headers,
+    });
+  } catch (netErr: any) {
+    console.error(`[API Network Error] ${options.method || 'GET'} ${API_BASE}${endpoint}:`, netErr);
+    throw new Error('Unable to reach AI analysis server. Please check network connection or server status.');
+  }
 
   if (!response.ok) {
     if (response.status === 401) {
       removeAuthToken();
       localStorage.removeItem('skillguard_current_user');
-      // Dispatch custom event for seamless React routing instead of hard browser page reload
       window.dispatchEvent(new CustomEvent('skillguard:unauthorized'));
+      throw new Error('Authentication expired. Please log in again.');
+    }
+    if (response.status === 403) {
+      throw new Error('You are not authorized to perform this operation or analyze this submission.');
+    }
+    if (response.status === 404) {
+      throw new Error('AI analysis endpoint or submission media not found.');
+    }
+    if (response.status === 503) {
+      throw new Error('AI analysis service temporarily unavailable. Database or server is warming up, please retry shortly.');
+    }
+    if (response.status >= 500) {
+      const errorData = await response.json().catch(() => ({ detail: 'AI analysis server error.' }));
+      throw new Error(errorData.detail || 'AI analysis server error.');
     }
     const errorData = await response.json().catch(() => ({ detail: 'API Error' }));
     throw new Error(errorData.detail || `Request failed with status ${response.status}`);

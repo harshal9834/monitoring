@@ -620,6 +620,17 @@ def get_submission_detail(
         "submittedAt": sub.submitted_at.strftime("%Y-%m-%d %I:%M %p") if sub.submitted_at else str(sub.attendance_date)
     }
 
+@router.get("/debug/ai-analysis-route")
+def debug_ai_analysis_route(
+    current_user: User = Depends(require_roles(["GOVERNMENT_ADMIN", "MONITORING_OFFICER", "SUPER_ADMIN"]))
+):
+    """Temporary protected diagnostic endpoint to confirm AI route registration without exposing secrets."""
+    return {
+        "status": "ok",
+        "route_registered": True
+    }
+
+
 @router.post("/submissions/{submission_id}/analyze")
 def trigger_submission_ai_analysis(
     submission_id: str,
@@ -630,8 +641,33 @@ def trigger_submission_ai_analysis(
     if not sub:
         raise HTTPException(status_code=404, detail="Submission not found")
 
+    # Diagnostic logging (never log secrets)
+    print(
+        f"[AI ANALYSIS]\n"
+        f"request received\n"
+        f"user_id={current_user.id}\n"
+        f"role={current_user.role}\n"
+        f"center_id={sub.centre_id}\n"
+        f"submission_id={submission_id}\n"
+        f"submission_media_id={sub.video_id or 'none'}",
+        flush=True
+    )
+
     has_video = bool(sub.video_id or sub.video_path)
     has_image = bool(sub.image_path)
+
+    # Also check SubmissionMedia table for Cloudinary records
+    media_records = db.query(SubmissionMedia).filter(
+        SubmissionMedia.submission_id == sub.id,
+        SubmissionMedia.center_id == sub.centre_id
+    ).all()
+    video_media = next((m for m in media_records if m.media_type == "VIDEO"), None)
+    image_media = next((m for m in media_records if m.media_type == "IMAGE"), None)
+
+    if video_media:
+        has_video = True
+    if image_media:
+        has_image = True
 
     if not has_video and not has_image:
         raise HTTPException(status_code=400, detail="Cannot run AI media analysis: No video or image uploaded with this submission")
@@ -685,7 +721,14 @@ def trigger_submission_ai_analysis(
     try:
         # 1. Process Video if present
         if has_video:
-            video_target = (video.file_path if video and video.file_path else sub.video_path) or ""
+            video_target = ""
+            if video_media and (video_media.secure_url or video_media.cloudinary_url):
+                video_target = video_media.secure_url or video_media.cloudinary_url
+            elif video and video.file_path:
+                video_target = video.file_path
+            elif sub.video_path:
+                video_target = sub.video_path
+
             video_local_path = None
 
             if video_target.startswith("http://") or video_target.startswith("https://"):
@@ -706,7 +749,12 @@ def trigger_submission_ai_analysis(
 
         # 2. Process Image if present
         if has_image:
-            image_target = sub.image_path or ""
+            image_target = ""
+            if image_media and (image_media.secure_url or image_media.cloudinary_url):
+                image_target = image_media.secure_url or image_media.cloudinary_url
+            elif sub.image_path:
+                image_target = sub.image_path
+
             img_local_path = None
 
             if image_target.startswith("http://") or image_target.startswith("https://"):
@@ -817,7 +865,12 @@ def trigger_submission_ai_analysis(
     else:
         sub.status = "VERIFIED"
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception as db_err:
+        db.rollback()
+        print(f"[AI ANALYSIS COMMIT ERROR]: {db_err}", flush=True)
+        raise HTTPException(status_code=500, detail="Database commit failed during AI analysis")
 
     return {
         "success": True,

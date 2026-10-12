@@ -52,7 +52,7 @@ def get_system_thresholds(db: Session):
         "default_fps": default_fps
     }
 
-def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_fps: int = None) -> dict:
+def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_fps: int = None, max_sampled_frames: int = 40) -> dict:
     thresholds = get_system_thresholds(db)
     fps_to_use = sample_fps or thresholds["default_fps"]
 
@@ -64,7 +64,12 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     duration_sec = total_frames / native_fps if native_fps > 0 else 0.0
 
-    frame_interval = max(1, int(round(native_fps / fps_to_use)))
+    raw_frame_interval = max(1, int(round(native_fps / fps_to_use)))
+    # If video is long, dynamically adjust frame interval so sampled frames do not exceed max_sampled_frames
+    if total_frames > 0 and (total_frames // raw_frame_interval) > max_sampled_frames:
+        frame_interval = max(1, int(total_frames // max_sampled_frames))
+    else:
+        frame_interval = raw_frame_interval
 
     engine = get_inference_engine()
 
