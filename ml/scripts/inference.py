@@ -33,26 +33,31 @@ class SkillGuardInferenceEngine:
                 except Exception:
                     pass
         if not model_path or not os.path.exists(model_path):
-            model_path = "yolov8n.pt"
+            for candidate in ["yolov8m.pt", "monitoring/yolov8m.pt", "yolov8s.pt", "monitoring/yolov8s.pt", "yolov8n.pt", "monitoring/yolov8n.pt"]:
+                if os.path.exists(candidate):
+                    model_path = candidate
+                    break
+        if not model_path or not os.path.exists(model_path):
+            model_path = "yolov8m.pt"
 
         print(f"[SkillGuard AI] Loading YOLO Inference Weights from: {model_path}")
         try:
             import torch
-            torch.set_num_threads(1)
+            torch.set_num_threads(2)
         except Exception:
             pass
         self.model = YOLO(model_path)
         self.classes = ["person"]
         self.unsupported = ["computer", "machine", "workbench", "chair"]
 
-    def infer_frame(self, frame_bgr, conf_thresh=0.25):
+    def infer_frame(self, frame_bgr, conf_thresh=0.12):
         h, w = frame_bgr.shape[:2]
         try:
             import torch
             with torch.no_grad():
-                results = self.model.predict(source=frame_bgr, conf=conf_thresh, imgsz=320, verbose=False)
+                results = self.model.predict(source=frame_bgr, conf=conf_thresh, imgsz=640, verbose=False)
         except Exception:
-            results = self.model.predict(source=frame_bgr, conf=conf_thresh, verbose=False)
+            results = self.model.predict(source=frame_bgr, conf=conf_thresh, imgsz=640, verbose=False)
 
         
         detections = []

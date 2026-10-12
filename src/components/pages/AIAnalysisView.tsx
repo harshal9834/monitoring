@@ -197,11 +197,18 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
 
   // Extract closest frame detections
   const frameEvents: any[] = analysisData?.frameEvents || [];
+  // Find initial representative frame if at t=0 and paused
+  const defaultInitialFrame = frameEvents.length > 0
+    ? (frameEvents.find((f: any) => (f.detections || []).some((d: any) => d.class === 'person')) || frameEvents[0])
+    : null;
+
   const currentFrameEvent = frameEvents.length > 0
-    ? frameEvents.reduce((prev: any, curr: any) => {
-        if (!prev) return curr;
-        return Math.abs(curr.timestamp - currentTime) < Math.abs(prev.timestamp - currentTime) ? curr : prev;
-      }, frameEvents[0])
+    ? (currentTime === 0 && !isPlaying && defaultInitialFrame
+        ? defaultInitialFrame
+        : frameEvents.reduce((prev: any, curr: any) => {
+            if (!prev) return curr;
+            return Math.abs(curr.timestamp - currentTime) < Math.abs(prev.timestamp - currentTime) ? curr : prev;
+          }, frameEvents[0]))
     : null;
 
   const activeDetections: any[] = currentFrameEvent ? (currentFrameEvent.detections || []) : [];
@@ -215,22 +222,45 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const width = video.clientWidth || 640;
-    const height = video.clientHeight || 360;
-    canvas.width = width;
-    canvas.height = height;
+    const containerW = canvas.parentElement?.clientWidth || video.clientWidth || 640;
+    const containerH = canvas.parentElement?.clientHeight || video.clientHeight || 360;
+    canvas.width = containerW;
+    canvas.height = containerH;
 
-    ctx.clearRect(0, 0, width, height);
+    ctx.clearRect(0, 0, containerW, containerH);
+
+    // Calculate aspect ratio letterbox scaling matching CSS object-contain
+    const vidW = video.videoWidth || containerW;
+    const vidH = video.videoHeight || containerH;
+    const vidRatio = vidW / vidH;
+    const contRatio = containerW / containerH;
+
+    let renderW = containerW;
+    let renderH = containerH;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (vidRatio > contRatio) {
+      renderW = containerW;
+      renderH = containerW / vidRatio;
+      offsetX = 0;
+      offsetY = (containerH - renderH) / 2;
+    } else {
+      renderH = containerH;
+      renderW = containerH * vidRatio;
+      offsetY = 0;
+      offsetX = (containerW - renderW) / 2;
+    }
 
     activeDetections.forEach((det: any) => {
       const bbox = det.bbox;
       if (!Array.isArray(bbox) || bbox.length < 4) return;
 
       const [cx, cy, bw, bh] = bbox;
-      const x = (cx - bw / 2) * width;
-      const y = (cy - bh / 2) * height;
-      const w = bw * width;
-      const h = bh * height;
+      const x = offsetX + (cx - bw / 2) * renderW;
+      const y = offsetY + (cy - bh / 2) * renderH;
+      const w = bw * renderW;
+      const h = bh * renderH;
 
       const isPerson = det.class === 'person';
       const isSelectedTrack = selectedTrackId !== null && det.trackId === selectedTrackId;

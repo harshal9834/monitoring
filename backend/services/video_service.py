@@ -20,10 +20,12 @@ _inference_engine = None
 def get_inference_engine():
     global _inference_engine
     if _inference_engine is None:
-        model_path = "yolov8n.pt"
-        if not os.path.exists(model_path):
-            model_path = "monitoring/yolov8n.pt"
-        _inference_engine = SkillGuardInferenceEngine(model_path if os.path.exists(model_path) else None)
+        model_path = None
+        for candidate in ["yolov8m.pt", "monitoring/yolov8m.pt", "yolov8s.pt", "monitoring/yolov8s.pt", "yolov8n.pt", "monitoring/yolov8n.pt"]:
+            if os.path.exists(candidate):
+                model_path = candidate
+                break
+        _inference_engine = SkillGuardInferenceEngine(model_path)
     return _inference_engine
 
 def get_system_thresholds(db: Session):
@@ -171,12 +173,23 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
         median_persons = sorted_counts[len(sorted_counts) // 2]
         avg_persons = int(round(np.mean(person_counts)))
         peak_persons = max(person_counts)
+        # In surveillance/classroom streams, frames where students are seated may vary in visibility.
+        # Robust estimate: use upper quartile or average of active detection frames
+        active_counts = [c for c in person_counts if c > 0]
+        if active_counts:
+            sorted_active = sorted(active_counts)
+            # Use top 60% average or active median
+            top_active_slice = sorted_active[len(sorted_active)//3:]
+            active_robust = int(round(np.mean(top_active_slice)))
+        else:
+            active_robust = 0
     else:
         median_persons = 0
         avg_persons = 0
         peak_persons = 0
+        active_robust = 0
 
-    estimated_presence = max(median_persons, min(avg_persons, total_unique_tracks or avg_persons))
+    estimated_presence = max(active_robust, median_persons)
     if estimated_presence == 0 and peak_persons > 0:
         estimated_presence = peak_persons
 
