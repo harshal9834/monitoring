@@ -93,14 +93,20 @@ def resolve_database_url() -> tuple[str, dict]:
 
 DATABASE_URL, db_connect_args = resolve_database_url()
 
-# Engine with pool pre-ping and 300s recycle (critical for TiDB Serverless idle connections)
+# Ensure finite connection/read/write/pool timeouts for TiDB & MySQL
+connect_args = dict(db_connect_args)
+connect_args.setdefault("connect_timeout", 10)
+connect_args.setdefault("read_timeout", 10)
+connect_args.setdefault("write_timeout", 10)
+
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=5,
+    max_overflow=5,
     pool_recycle=300,
-    connect_args=db_connect_args,
+    pool_timeout=10,
+    connect_args=connect_args,
     echo=False
 )
 
@@ -134,14 +140,19 @@ def safe_init_db_schema() -> bool:
     - Captures errors gracefully without raising exceptions.
     """
     try:
+        print("[Database Init] Starting connection test...", flush=True)
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
+            print("[Database Init] Connection established.", flush=True)
+            res = conn.execute(text("SELECT 1")).scalar()
+            print(f"[Database Init] SELECT 1 successful: {res}", flush=True)
 
+        print("[Database Init] Inspecting tables...", flush=True)
         inspector = inspect(engine)
         existing_tables = inspector.get_table_names()
+        print(f"[Database Init] Existing tables: {existing_tables}", flush=True)
 
         if "roles" in existing_tables and "users" in existing_tables:
-            print(f"[Database Init] Schema verified: {len(existing_tables)} tables present in database.")
+            print(f"[Database Init] Schema verified: {len(existing_tables)} tables present in database.", flush=True)
             db_status_info["initialized"] = True
             db_status_info["last_check_status"] = "connected"
             db_status_info["last_error"] = None
@@ -149,16 +160,16 @@ def safe_init_db_schema() -> bool:
 
         auto_create = os.getenv("AUTO_CREATE_TABLES", "true").lower() in ("true", "1", "yes")
         if auto_create:
-            print("[Database Init] Tables not found. Attempting initial schema creation...")
+            print("[Database Init] Tables not found. Creating schema...", flush=True)
             from backend.models import models
             Base.metadata.create_all(bind=engine)
-            print("[Database Init] Tables created successfully.")
+            print("[Database Init] Tables created successfully.", flush=True)
             db_status_info["initialized"] = True
             db_status_info["last_check_status"] = "connected"
             db_status_info["last_error"] = None
             return True
         else:
-            print("[Database Init] Schema auto-creation disabled (AUTO_CREATE_TABLES=false).")
+            print("[Database Init] Schema auto-creation disabled (AUTO_CREATE_TABLES=false).", flush=True)
             db_status_info["initialized"] = True
             db_status_info["last_check_status"] = "connected"
             db_status_info["last_error"] = None
@@ -166,17 +177,21 @@ def safe_init_db_schema() -> bool:
 
     except Exception as e:
         err_msg = str(e)
+        exc_type = type(e).__name__
+        print(f"[Database Init ERROR] {exc_type}: {err_msg}", flush=True)
+        import traceback
+        traceback.print_exc()
+
         db_status_info["initialized"] = False
         db_status_info["last_check_status"] = "unavailable"
-        db_status_info["last_error"] = err_msg
+        db_status_info["last_error"] = f"{exc_type}: {err_msg}"
         if "1142" in err_msg or "command denied" in err_msg.lower():
             print(
                 "[Database Init Notice] TiDB/MySQL user does not have DDL CREATE privileges on this schema.\n"
                 "If tables already exist, queries will run normally.\n"
-                "To initialize a fresh database, run 'GRANT ALL PRIVILEGES ON <dbname>.* TO ...' in TiDB Cloud Console."
+                "To initialize a fresh database, run 'GRANT ALL PRIVILEGES ON <dbname>.* TO ...' in TiDB Cloud Console.",
+                flush=True
             )
-        else:
-            print(f"[Database Init Notice] Connectivity check: {err_msg}")
         return False
 
 

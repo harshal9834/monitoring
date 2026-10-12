@@ -170,50 +170,89 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
 @router.post("/register")
 def register(req: RegisterRequest, db: Session = Depends(get_db)):
-    existing = db.query(User).filter(User.email == req.email.strip().lower()).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="An account with this email already exists")
+    print(f"[AUTH REGISTER] Starting registration for email: {req.email.strip().lower()}", flush=True)
+    try:
+        print("[AUTH REGISTER] Database session acquired", flush=True)
+        print("[AUTH REGISTER] Checking existing user", flush=True)
+        existing = db.query(User).filter(User.email == req.email.strip().lower()).first()
+        if existing:
+            print(f"[AUTH REGISTER] User already exists with email: {req.email.strip().lower()}", flush=True)
+            raise HTTPException(status_code=400, detail="An account with this email already exists")
 
-    user_id = f"usr_{int(datetime.utcnow().timestamp())}"
-    is_gov = req.role in ["GOVERNMENT_ADMIN", "MONITORING_OFFICER"]
-    initial_status = "PENDING_APPROVAL" if is_gov else "ACTIVE"
-
-    new_user = User(
-        id=user_id,
-        name=req.name,
-        email=req.email.strip().lower(),
-        password_hash=hash_password(req.password),
-        phone=req.phone,
-        role=req.role,
-        designation=req.designation or "Authorized Officer",
-        department=req.department or "Vocational Cell",
-        district=req.district or "Pune",
-        status=initial_status
-    )
-    db.add(new_user)
-    db.flush()
-
-    if req.role == "CENTRE_ADMIN" and req.centre_code:
-        # Check if centre exists or create centre shell
-        centre = db.query(TrainingCentre).filter(TrainingCentre.centre_code == req.centre_code).first()
-        if not centre:
-            c_id = f"tc_{int(datetime.utcnow().timestamp())}"
-            centre = TrainingCentre(
-                id=c_id,
-                centre_code=req.centre_code,
-                name=req.centre_name or f"Skill Centre ({req.centre_code})",
-                address="Accredited Facility",
-                district=req.district or "Pune",
-                state="Maharashtra",
-                approved_capacity=40,
-                status="ACTIVE"
+        # Ensure statutory role exists in roles table
+        role_record = db.query(Role).filter(Role.id == req.role).first()
+        if not role_record:
+            print(f"[AUTH REGISTER] Role '{req.role}' not found in database. Initializing role...", flush=True)
+            role_names = {
+                "SUPER_ADMIN": "Super Administrator",
+                "GOVERNMENT_ADMIN": "Government Administrator",
+                "MONITORING_OFFICER": "Monitoring Officer",
+                "CENTRE_ADMIN": "Training Centre Administrator"
+            }
+            new_role = Role(
+                id=req.role,
+                name=role_names.get(req.role, req.role),
+                description=f"Auto-initialized role {req.role}",
+                created_at=datetime.utcnow()
             )
-            db.add(centre)
+            db.add(new_role)
             db.flush()
-        db.add(CentreUser(centre_id=centre.id, user_id=user_id, is_primary_contact=True))
 
-    db.commit()
-    return {"success": True, "message": "User registered successfully", "status": initial_status}
+        user_id = f"usr_{int(datetime.utcnow().timestamp())}"
+        is_gov = req.role in ["GOVERNMENT_ADMIN", "MONITORING_OFFICER"]
+        initial_status = "PENDING_APPROVAL" if is_gov else "ACTIVE"
+
+        print(f"[AUTH REGISTER] Creating user: {user_id}", flush=True)
+        new_user = User(
+            id=user_id,
+            name=req.name,
+            email=req.email.strip().lower(),
+            password_hash=hash_password(req.password),
+            phone=req.phone,
+            role=req.role,
+            designation=req.designation or "Authorized Officer",
+            department=req.department or "Vocational Cell",
+            district=req.district or "Pune",
+            status=initial_status
+        )
+        db.add(new_user)
+        db.flush()
+
+        if req.role == "CENTRE_ADMIN" and req.centre_code:
+            # Check if centre exists or create centre shell
+            centre = db.query(TrainingCentre).filter(TrainingCentre.centre_code == req.centre_code).first()
+            if not centre:
+                c_id = f"tc_{int(datetime.utcnow().timestamp())}"
+                print(f"[AUTH REGISTER] Creating training centre shell: {c_id} ({req.centre_code})", flush=True)
+                centre = TrainingCentre(
+                    id=c_id,
+                    centre_code=req.centre_code,
+                    name=req.centre_name or f"Skill Centre ({req.centre_code})",
+                    address="Accredited Facility",
+                    district=req.district or "Pune",
+                    state="Maharashtra",
+                    approved_capacity=40,
+                    status="ACTIVE"
+                )
+                db.add(centre)
+                db.flush()
+            db.add(CentreUser(centre_id=centre.id, user_id=user_id, is_primary_contact=True))
+
+        db.commit()
+        print("[AUTH REGISTER] Commit successful", flush=True)
+        return {"success": True, "message": "User registered successfully", "status": initial_status}
+
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        exc_type = type(e).__name__
+        err_msg = str(e)
+        print(f"[AUTH REGISTER ERROR] {exc_type}: {err_msg}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise
 
 @router.get("/me")
 def get_profile(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

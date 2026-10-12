@@ -19,25 +19,26 @@ async def init_db_background():
     Runs database schema check & initialization in the background after the server starts.
     Bounded retry to prevent infinite looping. Server remains fully responsive throughout.
     """
-    max_retries = 3
-    retry_delay_seconds = 5
-    for attempt in range(1, max_retries + 1):
-        try:
-            print(f"[Database Background Init] Attempt {attempt}/{max_retries}...")
-            # Run blocking database calls in a thread pool to avoid blocking the event loop
-            success = await asyncio.to_thread(safe_init_db_schema)
-            if success:
-                print(f"[Database Background Init] Schema successfully initialized/verified on attempt {attempt}.")
-                return
-            else:
-                print(f"[Database Background Init] Schema check returned False on attempt {attempt}.")
-        except Exception as e:
-            print(f"[Database Background Init] Attempt {attempt} failed: {e}")
+    import time
+    for attempt in range(1, 4):
+        print(f"[Database Background Init] Attempt {attempt}/3...", flush=True)
 
-        if attempt < max_retries:
-            await asyncio.sleep(retry_delay_seconds)
+        success = await asyncio.to_thread(safe_init_db_schema)
 
-    print("[Database Background Init] Bounded retries completed. Backend running in resilient mode.")
+        if success:
+            print(
+                "[Database Background Init] Database initialization SUCCESS.",
+                flush=True
+            )
+            break
+
+        print(
+            f"[Database Background Init] Attempt {attempt} FAILED.",
+            flush=True
+        )
+
+        if attempt < 3:
+            await asyncio.sleep(5)
 
 
 @asynccontextmanager
@@ -172,10 +173,34 @@ def health_check():
     return {
         "status": overall_status,
         "database": db_status,
-        "service": "SkillGuard AI Enterprise Platform",
+        "service": "skillguard-api",
         "inference_engine": "Ultralytics YOLOv8m (15fps Active)",
         "version": "2.4.0"
     }
+
+# TEMPORARY: Database Connection Debug Endpoint (Easy to remove after verification)
+@app.get("/api/debug/db")
+def debug_db():
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1")).scalar()
+        return {
+            "status": "ok",
+            "database": "connected",
+            "result": int(result) if result is not None else 1
+        }
+    except Exception as e:
+        exc_type = type(e).__name__
+        err_msg = str(e)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "status": "error",
+                "error_type": exc_type,
+                "error": err_msg
+            }
+        )
 
 # WebSocket for Real-Time CCTV Inference & Alert Telemetry (Section 27)
 class ConnectionManager:
