@@ -3,7 +3,7 @@ import json
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Optional
-from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
@@ -71,11 +71,30 @@ async def db_operational_error_handler(request, exc: OperationalError):
     )
 
 @app.exception_handler(DBAPIError)
-async def db_api_error_handler(request, exc: DBAPIError):
+async def db_api_error_handler(request: Request, exc: DBAPIError):
     import logging
     logger = logging.getLogger("skillguard.database")
-    logger.exception(f"[DBAPIError on {request.url.path}]: {exc}")
     orig_msg = str(getattr(exc, 'orig', exc))
+
+    safe_user_id = getattr(request.state, "user_id", "unknown")
+    safe_center_id = getattr(request.state, "center_id", "unknown")
+    safe_submission_id = getattr(request.state, "submission_id", "unknown")
+
+    logger.exception(
+        "SUBMISSION DATABASE ERROR",
+        extra={
+            "user_id": safe_user_id,
+            "center_id": safe_center_id,
+            "submission_id": safe_submission_id
+        }
+    )
+    print(
+        f"[SUBMISSION DATABASE ERROR] Exception: {type(exc).__name__} | "
+        f"Error: {orig_msg} | user_id: {safe_user_id} | center_id: {safe_center_id} | "
+        f"submission_id: {safe_submission_id}",
+        flush=True
+    )
+
     # If it is an operational/connection issue return 503, otherwise if query/schema/data error return 500
     is_conn = any(term in orig_msg.lower() for term in ["lost connection", "can't connect", "timeout", "timed out", "closed connection"])
     status_code = 503 if is_conn else 500

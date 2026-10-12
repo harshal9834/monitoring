@@ -243,7 +243,20 @@ def submit_centre_daily_data(
 
     # Batch matching
     batch = db.query(CentreBatch).filter(CentreBatch.centre_id == centre_id).first()
-    batch_id = batch.id if batch else "btc_001"
+    if not batch:
+        batch = CentreBatch(
+            id=f"btc_{centre_id}",
+            centre_id=centre_id,
+            batch_code="AI-101",
+            course_name="Industrial Automation & Embedded Systems",
+            instructor_name=current_user.name or "Lead Trainer",
+            sanctioned_strength=40,
+            status="ACTIVE",
+            created_at=datetime.utcnow()
+        )
+        db.add(batch)
+        db.flush()
+    batch_id = batch.id
 
     # Generate standard submission ID SUB-2026-XXXXX
     sub_seq = (int(datetime.utcnow().timestamp() * 1000) % 90000) + 10000

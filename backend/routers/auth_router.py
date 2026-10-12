@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from datetime import datetime
 from backend.database import get_db
-from backend.models.models import User, Role, CentreUser, TrainingCentre, AuditLog
+from backend.models.models import User, Role, CentreUser, TrainingCentre, CentreBatch, AuditLog
 from backend.schemas.schemas import LoginRequest, RegisterRequest, TokenResponse
 from backend.services.auth_service import (
     verify_password, hash_password, create_access_token, create_refresh_token, get_current_user
@@ -261,6 +261,21 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
                 db.flush()
             new_user.centre_id = centre.id
             db.add(CentreUser(centre_id=centre.id, user_id=user_id, is_primary_contact=True))
+
+            # Ensure centre has at least one active batch
+            existing_batch = db.query(CentreBatch).filter(CentreBatch.centre_id == centre.id).first()
+            if not existing_batch:
+                init_batch = CentreBatch(
+                    id=f"btc_{centre.id}",
+                    centre_id=centre.id,
+                    batch_code="AI-101",
+                    course_name="Industrial Automation & Embedded Systems",
+                    instructor_name=new_user.name or "Lead Trainer",
+                    sanctioned_strength=40,
+                    status="ACTIVE",
+                    created_at=datetime.utcnow()
+                )
+                db.add(init_batch)
 
         db.commit()
         print("[AUTH REGISTER] Commit successful", flush=True)

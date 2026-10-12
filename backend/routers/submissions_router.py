@@ -30,9 +30,10 @@ from backend.services.cloudinary_service import (
 router = APIRouter(prefix="/api/submissions", tags=["Submissions"])
 
 
-@router.post("")
-@router.post("/")
+@router.post("", status_code=201)
+@router.post("/", status_code=201)
 async def create_submission(
+    request: Request,
     batchId: Optional[str] = Form(None),
     batch_code: Optional[str] = Form(None),
     course_name: Optional[str] = Form(None),
@@ -45,6 +46,9 @@ async def create_submission(
     infrastructureStatus: Optional[str] = Form("SUFFICIENT"),
     instructorName: Optional[str] = Form(None),
     infrastructure_reported: Optional[str] = Form(None),
+    centre_id: Optional[str] = Form(None),
+    center_id: Optional[str] = Form(None),
+    centreId: Optional[str] = Form(None),
     video: Optional[UploadFile] = File(None),
     image: Optional[UploadFile] = File(None),
     current_user: User = Depends(require_roles(["CENTRE_ADMIN", "SUPER_ADMIN"])),
@@ -59,28 +63,70 @@ async def create_submission(
     5. Runs AI inference using temporary working asset (deleted immediately after processing).
     6. Returns persistent submission record with Cloudinary secure_url.
     """
-    centre_id = get_centre_id_for_user(current_user, db)
-    centre = db.query(TrainingCentre).filter(TrainingCentre.id == centre_id).first()
+    print("[SUBMISSION] request received", flush=True)
+    print(f"[SUBMISSION] authenticated user: {current_user.id}", flush=True)
+
+    req_centre = centre_id or center_id or centreId
+    resolved_centre_id = None
+    if current_user.role == "SUPER_ADMIN":
+        if req_centre:
+            resolved_centre_id = req_centre.strip()
+        elif current_user.centre_id:
+            resolved_centre_id = current_user.centre_id
+        else:
+            first_c = db.query(TrainingCentre).filter(TrainingCentre.status == "ACTIVE").first()
+            resolved_centre_id = first_c.id if first_c else "tc_demo_001"
+    else:
+        resolved_centre_id = get_centre_id_for_user(current_user, db)
+
+    centre = db.query(TrainingCentre).filter(TrainingCentre.id == resolved_centre_id).first()
+    if not centre and resolved_centre_id:
+        centre = db.query(TrainingCentre).filter(TrainingCentre.centre_code == resolved_centre_id).first()
+        if centre:
+            resolved_centre_id = centre.id
+
     if not centre:
         raise HTTPException(status_code=404, detail="Assigned Training Centre not found")
 
     center_code_or_id = centre.centre_code or centre.id
+    print(f"[SUBMISSION] resolved center_id: {resolved_centre_id}", flush=True)
 
-    # Match or find batch
+    request.state.user_id = current_user.id
+    request.state.center_id = resolved_centre_id
+
+    # Match or find batch for this centre
     batch = None
-    b_id = batchId or batch_code
+    b_id = (batchId or batch_code or "").strip()
     if b_id:
         batch = db.query(CentreBatch).filter(
-            CentreBatch.centre_id == centre_id,
+            CentreBatch.centre_id == resolved_centre_id,
             (CentreBatch.id == b_id) | (CentreBatch.batch_code == b_id)
         ).first()
 
     if not batch:
-        batch = db.query(CentreBatch).filter(CentreBatch.centre_id == centre_id).first()
+        batch = db.query(CentreBatch).filter(CentreBatch.centre_id == resolved_centre_id).first()
 
-    final_batch_id = batch.id if batch else "btc_001"
-    final_batch_code = batch.batch_code if batch else (batch_code or "AI-102")
-    final_course_name = batch.course_name if batch else (course_name or "Vocational Skills Course")
+    # If still no batch exists for this centre, dynamically create a valid batch for this centre
+    if not batch:
+        b_code = (batch_code or "AI-101").strip()
+        c_name = (course_name or "Vocational Skills Course").strip()
+        batch_id_gen = f"btc_{resolved_centre_id}_{int(datetime.utcnow().timestamp()) % 10000}"
+        batch = CentreBatch(
+            id=batch_id_gen,
+            centre_id=resolved_centre_id,
+            batch_code=b_code,
+            course_name=c_name,
+            instructor_name=instructorName or current_user.name or "Lead Instructor",
+            sanctioned_strength=40,
+            status="ACTIVE",
+            created_at=datetime.utcnow()
+        )
+        db.add(batch)
+        db.flush()
+
+    final_batch_id = batch.id
+    final_batch_code = batch.batch_code
+    final_course_name = batch.course_name
 
     # Resolve date
     sub_date = submissionDate or date or datetime.utcnow().strftime("%Y-%m-%d")
@@ -103,6 +149,11 @@ async def create_submission(
     # Generate unique Submission ID SUB-2026-XXXXXX
     sub_seq = (int(datetime.utcnow().timestamp() * 1000) % 900000) + 100000
     sub_id = f"SUB-2026-{sub_seq}"
+    existing_sub = db.query(AttendanceSubmission).filter(AttendanceSubmission.id == sub_id).first()
+    if existing_sub:
+        sub_id = f"SUB-2026-{uuid.uuid4().hex[:6].upper()}"
+    request.state.submission_id = sub_id
+    print(f"[SUBMISSION] creating submission: {sub_id}", flush=True)
 
     # Handle Video Upload if provided
     video_rec = None
@@ -122,6 +173,7 @@ async def create_submission(
         if ext not in [".mp4", ".avi", ".mov", ".webm"]:
             ext = ".mp4"
 
+        print("[SUBMISSION] Cloudinary upload started", flush=True)
         try:
             video_bytes = await video.read()
             video_size_bytes = len(video_bytes)
@@ -142,6 +194,7 @@ async def create_submission(
             video_secure_url = format_cloudinary_video_url(cloud_res["secure_url"])
             video_public_id = cloud_res["public_id"]
             video_duration_sec = float(cloud_res.get("duration") or 0.0)
+            print(f"[SUBMISSION] Cloudinary upload successful: {video_public_id}", flush=True)
 
             # If duration is 0, probe from temporary memory file
             if video_duration_sec <= 0.0:
@@ -161,7 +214,7 @@ async def create_submission(
             vid_id = f"vid_{sub_id.replace('-', '_').lower()}"
             video_rec = Video(
                 id=vid_id,
-                centre_id=centre_id,
+                centre_id=resolved_centre_id,
                 uploaded_by=current_user.id,
                 file_name=video_orig_name,
                 file_path=video_secure_url,
@@ -185,10 +238,15 @@ async def create_submission(
             )
             db.add(job)
             ai_status = "PENDING"
+        except HTTPException:
+            raise
         except Exception as e:
             if temp_video_path and os.path.exists(temp_video_path):
-                os.remove(temp_video_path)
-            raise HTTPException(status_code=500, detail=f"Failed to upload video to Cloudinary: {str(e)}")
+                try:
+                    os.remove(temp_video_path)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=502, detail=f"Media upload failed: {str(e)}")
 
     # Handle Image Upload if provided
     img_orig_name = None
@@ -202,6 +260,7 @@ async def create_submission(
         if img_ext not in [".jpg", ".jpeg", ".png", ".webp"]:
             img_ext = ".jpg"
 
+        print("[SUBMISSION] Cloudinary upload started", flush=True)
         try:
             image_bytes = await image.read()
             img_size_bytes = len(image_bytes)
@@ -221,6 +280,7 @@ async def create_submission(
             )
             img_secure_url = cloud_img_res["secure_url"]
             img_public_id = cloud_img_res["public_id"]
+            print(f"[SUBMISSION] Cloudinary upload successful: {img_public_id}", flush=True)
 
             # Prepare temp file for immediate AI image inference
             fd_img, temp_image_path = tempfile.mkstemp(suffix=img_ext)
@@ -229,182 +289,242 @@ async def create_submission(
 
             if ai_status == "NOT_STARTED":
                 ai_status = "PENDING"
+        except HTTPException:
+            raise
         except Exception as e:
             if temp_image_path and os.path.exists(temp_image_path):
-                os.remove(temp_image_path)
+                try:
+                    os.remove(temp_image_path)
+                except Exception:
+                    pass
             if temp_video_path and os.path.exists(temp_video_path):
-                os.remove(temp_video_path)
-            raise HTTPException(status_code=500, detail=f"Failed to upload image to Cloudinary: {str(e)}")
+                try:
+                    os.remove(temp_video_path)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=502, detail=f"Media upload failed: {str(e)}")
 
-    # Create AttendanceSubmission record in MySQL
-    sub = AttendanceSubmission(
-        id=sub_id,
-        centre_id=centre_id,
-        batch_id=final_batch_id,
-        attendance_date=sub_date,
-        submitted_by=current_user.id,
-        session_name=f"{final_course_name} ({final_batch_code})",
-        start_time="09:00 AM",
-        end_time="01:00 PM",
-        instructor_name=instructorName or (batch.instructor_name if batch else current_user.name),
-        total_registered=reg,
-        total_present=pres,
-        total_absent=absent,
-        infrastructure_reported=infra_data,
-        infrastructure_status=infrastructureStatus or "SUFFICIENT",
-        video_id=video_rec.id if video_rec else None,
-        video_path=video_secure_url,
-        video_original_name=video_orig_name,
-        video_size=video_size_bytes,
-        image_path=img_secure_url,
-        image_original_name=img_orig_name,
-        image_size=img_size_bytes,
-        status="SUBMITTED",
-        ai_status=ai_status,
-        is_deleted=False,
-        submitted_at=datetime.utcnow()
-    )
-    db.add(sub)
-    db.flush()
+    try:
+        # Create AttendanceSubmission record in MySQL
+        sub = AttendanceSubmission(
+            id=sub_id,
+            centre_id=resolved_centre_id,
+            batch_id=final_batch_id,
+            attendance_date=sub_date,
+            submitted_by=current_user.id,
+            session_name=f"{final_course_name} ({final_batch_code})",
+            start_time="09:00 AM",
+            end_time="01:00 PM",
+            instructor_name=instructorName or (batch.instructor_name if batch else current_user.name),
+            total_registered=reg,
+            total_present=pres,
+            total_absent=absent,
+            infrastructure_reported=infra_data,
+            infrastructure_status=infrastructureStatus or "SUFFICIENT",
+            video_id=video_rec.id if video_rec else None,
+            video_path=video_secure_url,
+            video_original_name=video_orig_name,
+            video_size=video_size_bytes,
+            image_path=img_secure_url,
+            image_original_name=img_orig_name,
+            image_size=img_size_bytes,
+            status="SUBMITTED",
+            ai_status=ai_status,
+            is_deleted=False,
+            submitted_at=datetime.utcnow()
+        )
+        db.add(sub)
+        db.flush()
+        print("[SUBMISSION] submission row created", flush=True)
 
-    # Track in submission_media table with Cloudinary fields
-    if video_rec:
-        db.add(SubmissionMedia(
-            id=f"med_{uuid.uuid4().hex[:12]}",
-            submission_id=sub.id,
-            center_id=centre_id,
-            media_type="VIDEO",
-            file_name=video_orig_name or f"{sub_id}.mp4",
-            file_path=video_secure_url,
-            file_size_bytes=video_size_bytes,
-            mime_type=video_rec.mime_type,
-            duration_seconds=video_duration_sec,
-            cloudinary_public_id=video_public_id,
-            cloudinary_asset_id=cloud_res.get("asset_id") if "cloud_res" in locals() and cloud_res else None,
-            cloudinary_url=video_secure_url,
-            secure_url=video_secure_url,
-            resource_type="video",
-            format=cloud_res.get("format") if "cloud_res" in locals() and cloud_res else "mp4",
-            created_at=datetime.utcnow()
-        ))
+        # Track in submission_media table with Cloudinary fields
+        if video_rec:
+            db.add(SubmissionMedia(
+                id=f"med_{uuid.uuid4().hex[:12]}",
+                submission_id=sub.id,
+                center_id=resolved_centre_id,
+                media_type="VIDEO",
+                file_name=video_orig_name or f"{sub_id}.mp4",
+                file_path=video_secure_url,
+                file_size_bytes=video_size_bytes,
+                mime_type=video_rec.mime_type,
+                duration_seconds=video_duration_sec,
+                cloudinary_public_id=video_public_id,
+                cloudinary_asset_id=cloud_res.get("asset_id") if "cloud_res" in locals() and cloud_res else None,
+                cloudinary_url=video_secure_url,
+                secure_url=video_secure_url,
+                resource_type="video",
+                format=cloud_res.get("format") if "cloud_res" in locals() and cloud_res else "mp4",
+                created_at=datetime.utcnow()
+            ))
 
-    if img_secure_url:
-        db.add(SubmissionMedia(
-            id=f"med_{uuid.uuid4().hex[:12]}",
-            submission_id=sub.id,
-            center_id=centre_id,
-            media_type="IMAGE",
-            file_name=img_orig_name or f"{sub_id}.jpg",
-            file_path=img_secure_url,
-            file_size_bytes=img_size_bytes,
-            mime_type="image/jpeg",
-            duration_seconds=0.0,
-            cloudinary_public_id=img_public_id,
-            cloudinary_asset_id=cloud_img_res.get("asset_id") if "cloud_img_res" in locals() and cloud_img_res else None,
-            cloudinary_url=img_secure_url,
-            secure_url=img_secure_url,
-            resource_type="image",
-            format=cloud_img_res.get("format") if "cloud_img_res" in locals() and cloud_img_res else "jpg",
-            created_at=datetime.utcnow()
-        ))
+        if img_secure_url:
+            db.add(SubmissionMedia(
+                id=f"med_{uuid.uuid4().hex[:12]}",
+                submission_id=sub.id,
+                center_id=resolved_centre_id,
+                media_type="IMAGE",
+                file_name=img_orig_name or f"{sub_id}.jpg",
+                file_path=img_secure_url,
+                file_size_bytes=img_size_bytes,
+                mime_type="image/jpeg",
+                duration_seconds=0.0,
+                cloudinary_public_id=img_public_id,
+                cloudinary_asset_id=cloud_img_res.get("asset_id") if "cloud_img_res" in locals() and cloud_img_res else None,
+                cloudinary_url=img_secure_url,
+                secure_url=img_secure_url,
+                resource_type="image",
+                format=cloud_img_res.get("format") if "cloud_img_res" in locals() and cloud_img_res else "jpg",
+                created_at=datetime.utcnow()
+            ))
 
-    # If video attached, execute video processing pipeline using temporary file
-    if video_rec and temp_video_path and os.path.exists(temp_video_path):
-        try:
-            from backend.services.video_service import process_video_pipeline
-            analysis_data = process_video_pipeline(temp_video_path, centre_id, db)
-            est = analysis_data.get("estimated_presence", pres)
-            variance = max(0, pres - est)
-            variance_pct = round((variance / max(pres, 1)) * 100, 1)
+        if video_rec or img_secure_url:
+            print("[SUBMISSION] media metadata created", flush=True)
 
-            job.status = "COMPLETED"
-            job.progress_percentage = 100
-            job.analysis_results = analysis_data
-            job.completed_at = datetime.utcnow()
+        # If video attached, execute video processing pipeline using temporary file
+        if video_rec and temp_video_path and os.path.exists(temp_video_path):
+            try:
+                from backend.services.video_service import process_video_pipeline
+                analysis_data = process_video_pipeline(temp_video_path, resolved_centre_id, db)
+                est = analysis_data.get("estimated_presence", pres)
+                variance = max(0, pres - est)
+                variance_pct = round((variance / max(pres, 1)) * 100, 1)
 
-            sub.ai_status = "COMPLETED"
-            sub.ai_completed_at = datetime.utcnow()
-            sub.ai_detected_people = est
-            sub.ai_result_json = analysis_data
+                job.status = "COMPLETED"
+                job.progress_percentage = 100
+                job.analysis_results = analysis_data
+                job.completed_at = datetime.utcnow()
 
-            ai_res = AttendanceAIResult(
-                attendance_submission_id=sub_id,
-                video_id=video_rec.id,
-                model_version_id="v1.4.0",
-                estimated_people=est,
-                confidence=0.942,
-                variance_count=variance,
-                variance_percentage=variance_pct,
-                status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH"),
-                processed_at=datetime.utcnow()
-            )
-            db.add(ai_res)
+                sub.ai_status = "COMPLETED"
+                sub.ai_completed_at = datetime.utcnow()
+                sub.ai_detected_people = est
+                sub.ai_result_json = analysis_data
 
-            if variance_pct >= 10.0:
-                sub.status = "DISCREPANCY_CRITICAL"
-        except Exception as e:
-            print(f"[Warning] Immediate video pipeline execution skipped: {e}")
-            job.status = "PENDING"
-            sub.ai_status = "PENDING"
-            ai_res = AttendanceAIResult(
-                attendance_submission_id=sub_id,
-                video_id=video_rec.id,
-                model_version_id="v1.4.0",
-                estimated_people=pres,
-                confidence=0.94,
-                variance_count=0,
-                variance_percentage=0.0,
-                status="MATCH"
-            )
-            db.add(ai_res)
-        finally:
-            # Delete temporary video file immediately
+                ai_res = AttendanceAIResult(
+                    attendance_submission_id=sub_id,
+                    video_id=video_rec.id,
+                    model_version_id="v1.4.0",
+                    estimated_people=est,
+                    confidence=0.942,
+                    variance_count=variance,
+                    variance_percentage=variance_pct,
+                    status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH"),
+                    processed_at=datetime.utcnow()
+                )
+                db.add(ai_res)
+
+                if variance_pct >= 10.0:
+                    sub.status = "DISCREPANCY_CRITICAL"
+            except Exception as e:
+                print(f"[Warning] Immediate video pipeline execution skipped: {e}")
+                job.status = "PENDING"
+                sub.ai_status = "PENDING"
+                ai_res = AttendanceAIResult(
+                    attendance_submission_id=sub_id,
+                    video_id=video_rec.id,
+                    model_version_id="v1.4.0",
+                    estimated_people=pres,
+                    confidence=0.94,
+                    variance_count=0,
+                    variance_percentage=0.0,
+                    status="MATCH"
+                )
+                db.add(ai_res)
+            finally:
+                # Delete temporary video file immediately
+                if temp_video_path and os.path.exists(temp_video_path):
+                    try:
+                        os.remove(temp_video_path)
+                    except Exception:
+                        pass
+
+        # If image attached and no video, execute image processing pipeline using temporary file
+        elif img_secure_url and temp_image_path and os.path.exists(temp_image_path):
+            try:
+                from backend.services.video_service import process_image_pipeline
+                analysis_data = process_image_pipeline(temp_image_path, resolved_centre_id, db)
+                est = analysis_data.get("estimated_presence", pres)
+                variance = max(0, pres - est)
+                variance_pct = round((variance / max(pres, 1)) * 100, 1)
+
+                sub.ai_status = "COMPLETED"
+                sub.ai_completed_at = datetime.utcnow()
+                sub.ai_detected_people = est
+                sub.image_ai_result_json = analysis_data
+
+                ai_res = AttendanceAIResult(
+                    attendance_submission_id=sub_id,
+                    video_id=None,
+                    model_version_id="v1.4.0",
+                    estimated_people=est,
+                    confidence=0.942,
+                    variance_count=variance,
+                    variance_percentage=variance_pct,
+                    status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH"),
+                    processed_at=datetime.utcnow()
+                )
+                db.add(ai_res)
+
+                if variance_pct >= 10.0:
+                    sub.status = "DISCREPANCY_CRITICAL"
+            except Exception as e:
+                print(f"[Warning] Immediate image pipeline execution skipped: {e}")
+                sub.ai_status = "PENDING"
+            finally:
+                if temp_image_path and os.path.exists(temp_image_path):
+                    try:
+                        os.remove(temp_image_path)
+                    except Exception:
+                        pass
+        else:
+            # Clean up any residual temp paths
+            if temp_image_path and os.path.exists(temp_image_path):
+                try:
+                    os.remove(temp_image_path)
+                except Exception:
+                    pass
             if temp_video_path and os.path.exists(temp_video_path):
                 try:
                     os.remove(temp_video_path)
                 except Exception:
                     pass
 
-    # If image attached and no video, execute image processing pipeline using temporary file
-    elif img_secure_url and temp_image_path and os.path.exists(temp_image_path):
-        try:
-            from backend.services.video_service import process_image_pipeline
-            analysis_data = process_image_pipeline(temp_image_path, centre_id, db)
-            est = analysis_data.get("estimated_presence", pres)
-            variance = max(0, pres - est)
-            variance_pct = round((variance / max(pres, 1)) * 100, 1)
+        # Audit Log
+        audit = AuditLog(
+            id=f"aud_{uuid.uuid4().hex[:12]}",
+            user_id=current_user.id,
+            user_name=current_user.name,
+            role=current_user.role,
+            action="CREATE_SUBMISSION",
+            entity_type="ATTENDANCE_SUBMISSION",
+            entity_id=sub_id,
+            old_value=None,
+            new_value="SUBMITTED",
+            reason="Daily attendance report with Cloudinary media storage",
+            created_at=datetime.utcnow()
+        )
+        db.add(audit)
 
-            sub.ai_status = "COMPLETED"
-            sub.ai_completed_at = datetime.utcnow()
-            sub.ai_detected_people = est
-            sub.image_ai_result_json = analysis_data
+        db.commit()
+        print("[SUBMISSION] transaction committed", flush=True)
 
-            ai_res = AttendanceAIResult(
-                attendance_submission_id=sub_id,
-                video_id=None,
-                model_version_id="v1.4.0",
-                estimated_people=est,
-                confidence=0.942,
-                variance_count=variance,
-                variance_percentage=variance_pct,
-                status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH"),
-                processed_at=datetime.utcnow()
-            )
-            db.add(ai_res)
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as db_exc:
+        db.rollback()
+        # Clean up orphan Cloudinary assets if DB transaction failed
+        if video_public_id:
+            try:
+                delete_media(video_public_id, resource_type="video")
+            except Exception:
+                pass
+        if img_public_id:
+            try:
+                delete_media(img_public_id, resource_type="image")
+            except Exception:
+                pass
 
-            if variance_pct >= 10.0:
-                sub.status = "DISCREPANCY_CRITICAL"
-        except Exception as e:
-            print(f"[Warning] Immediate image pipeline execution skipped: {e}")
-            sub.ai_status = "PENDING"
-        finally:
-            if temp_image_path and os.path.exists(temp_image_path):
-                try:
-                    os.remove(temp_image_path)
-                except Exception:
-                    pass
-    else:
-        # Clean up any residual temp paths
         if temp_image_path and os.path.exists(temp_image_path):
             try:
                 os.remove(temp_image_path)
@@ -416,41 +536,26 @@ async def create_submission(
             except Exception:
                 pass
 
-    # Audit Log
-    audit = AuditLog(
-        id=f"aud_{uuid.uuid4().hex[:12]}",
-        user_id=current_user.id,
-        user_name=current_user.name,
-        role=current_user.role,
-        action="CREATE_SUBMISSION",
-        entity_type="ATTENDANCE_SUBMISSION",
-        entity_id=sub_id,
-        old_value=None,
-        new_value="SUBMITTED",
-        reason="Daily attendance report with Cloudinary media storage",
-        created_at=datetime.utcnow()
-    )
-    db.add(audit)
-
-    try:
-        db.commit()
-    except Exception as commit_err:
-        db.rollback()
-        # Clean up orphan Cloudinary assets if DB commit failed
-        if video_public_id:
-            try:
-                delete_media(video_public_id, resource_type="video")
-            except Exception:
-                pass
-        if img_public_id:
-            try:
-                delete_media(img_public_id, resource_type="image")
-            except Exception:
-                pass
-        print(f"[Submission DB Commit ERROR] {type(commit_err).__name__}: {commit_err}", flush=True)
+        import logging
+        sub_logger = logging.getLogger("skillguard.submissions")
+        sub_logger.exception(
+            "SUBMISSION DATABASE ERROR",
+            extra={
+                "user_id": current_user.id,
+                "center_id": resolved_centre_id,
+                "submission_id": sub_id
+            }
+        )
+        orig_err = getattr(db_exc, "orig", db_exc)
+        print(
+            f"[SUBMISSION DATABASE ERROR] class={type(db_exc).__name__} | "
+            f"db_error={orig_err} | user_id={current_user.id} | "
+            f"center_id={resolved_centre_id} | submission_id={sub_id}",
+            flush=True
+        )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to record submission in database: {str(commit_err)}"
+            detail=f"Database operation failed: {orig_err}"
         )
 
     return {
