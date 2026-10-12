@@ -25,29 +25,37 @@ export const CentreDashboardView: React.FC<CentreDashboardViewProps> = ({ onNavi
 
   useEffect(() => {
     let isMounted = true;
+    let consecutiveFailures = 0;
+    let timerId: any = null;
+
     const loadData = (isInitial = false) => {
       if (isInitial) setLoading(true);
       api.getCentreSummary()
         .then((data) => {
           if (!isMounted) return;
+          consecutiveFailures = 0;
           setCentreData(data);
           if (isInitial) setLoading(false);
+          // Schedule next poll after 30 seconds upon success
+          timerId = setTimeout(() => loadData(false), 30000);
         })
         .catch((err) => {
           console.warn('Failed to load centre summary:', err);
-          if (isMounted && isInitial) setLoading(false);
+          if (!isMounted) return;
+          if (isInitial) setLoading(false);
+          consecutiveFailures += 1;
+          // Stop hammering the server after repeated failures
+          if (consecutiveFailures < 3) {
+            timerId = setTimeout(() => loadData(false), 60000);
+          }
         });
     };
 
     loadData(true);
 
-    const interval = setInterval(() => {
-      loadData(false);
-    }, 30000);
-
     return () => {
       isMounted = false;
-      clearInterval(interval);
+      if (timerId) clearTimeout(timerId);
     };
   }, []);
 

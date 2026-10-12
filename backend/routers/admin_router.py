@@ -957,6 +957,44 @@ def get_admin_audit_logs(
     ]
 
 
+@router.get("/test-cloudinary")
+def test_cloudinary_connectivity(
+    current_user: User = Depends(require_roles(["SUPER_ADMIN", "GOVERNMENT_ADMIN"])),
+    db: Session = Depends(get_db)
+):
+    """
+    Harmless Cloudinary connectivity check per Requirement 8:
+    - verifies Cloudinary environment variables exist
+    - performs a harmless Cloudinary API connectivity check
+    - returns safe diagnostic information without exposing API secrets
+    """
+    from backend.services.cloudinary_service import is_cloudinary_configured, init_cloudinary
+    cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME")
+    api_key = os.getenv("CLOUDINARY_API_KEY")
+
+    if not is_cloudinary_configured() or not init_cloudinary():
+        raise HTTPException(status_code=500, detail="Cloudinary is not configured on the server")
+
+    import cloudinary.api
+    try:
+        ping_res = cloudinary.api.ping()
+        return {
+            "status": "ok",
+            "connected": True,
+            "cloud_name": cloud_name,
+            "api_key_configured": bool(api_key),
+            "ping": ping_res.get("status") if isinstance(ping_res, dict) else "ok"
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "connected": False,
+            "cloud_name": cloud_name,
+            "api_key_configured": bool(api_key),
+            "error": str(e)
+        }
+
+
 @router.post("/test-cloudinary")
 async def test_cloudinary_upload(
     file: UploadFile = File(...),

@@ -23,7 +23,8 @@ from backend.services.cloudinary_service import (
     upload_media_to_cloudinary,
     is_cloudinary_configured,
     download_temp_media_file,
-    format_cloudinary_video_url
+    format_cloudinary_video_url,
+    delete_media
 )
 
 router = APIRouter(prefix="/api/submissions", tags=["Submissions"])
@@ -430,7 +431,27 @@ async def create_submission(
         created_at=datetime.utcnow()
     )
     db.add(audit)
-    db.commit()
+
+    try:
+        db.commit()
+    except Exception as commit_err:
+        db.rollback()
+        # Clean up orphan Cloudinary assets if DB commit failed
+        if video_public_id:
+            try:
+                delete_media(video_public_id, resource_type="video")
+            except Exception:
+                pass
+        if img_public_id:
+            try:
+                delete_media(img_public_id, resource_type="image")
+            except Exception:
+                pass
+        print(f"[Submission DB Commit ERROR] {type(commit_err).__name__}: {commit_err}", flush=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to record submission in database: {str(commit_err)}"
+        )
 
     return {
         "success": True,

@@ -138,13 +138,13 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
                 onClick={() => {
                   if (portalType === 'government') {
                     setEmail('government@skillguard.ai');
-                    setPassword('Gov@12345');
+                    setPassword('Government@123');
                   } else if (portalType === 'centre') {
                     setEmail('centre@skillguard.ai');
-                    setPassword('Centre@12345');
+                    setPassword('Centre@123');
                   } else {
                     setEmail('admin@skillguard.ai');
-                    setPassword('Admin@12345');
+                    setPassword('Admin@123');
                     setTwoFactorCode('123456');
                   }
                 }}
@@ -174,10 +174,10 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
                 <span className="text-slate-400">Password: </span>
                 <span className="font-semibold text-slate-900">
                   {portalType === 'government'
-                    ? 'Gov@12345'
+                    ? 'Government@123'
                     : portalType === 'centre'
-                    ? 'Centre@12345'
-                    : 'Admin@12345'}
+                    ? 'Centre@123'
+                    : 'Admin@123'}
                 </span>
               </div>
             </div>

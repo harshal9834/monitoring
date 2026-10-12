@@ -295,13 +295,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       onClick={() => {
                         if (loginRoleOption === 'GOVERNMENT_OFFICER') {
                           setLoginEmail('government@skillguard.ai');
-                          setLoginPassword('Gov@12345');
+                          setLoginPassword('Government@123');
                         } else if (loginRoleOption === 'CENTRE_ADMIN') {
                           setLoginEmail('centre@skillguard.ai');
-                          setLoginPassword('Centre@12345');
+                          setLoginPassword('Centre@123');
                         } else {
                           setLoginEmail('admin@skillguard.ai');
-                          setLoginPassword('Admin@12345');
+                          setLoginPassword('Admin@123');
                         }
                       }}
                       className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-white px-2 py-0.5 rounded border border-slate-200 shadow-2xs hover:bg-indigo-50 transition-colors"
@@ -324,10 +324,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <span className="text-slate-400">Password: </span>
                       <span className="font-semibold text-slate-900">
                         {loginRoleOption === 'GOVERNMENT_OFFICER'
-                          ? 'Gov@12345'
+                          ? 'Government@123'
                           : loginRoleOption === 'CENTRE_ADMIN'
-                          ? 'Centre@12345'
-                          : 'Admin@12345'}
+                          ? 'Centre@123'
+                          : 'Admin@123'}
                       </span>
                     </div>
                   </div>

@@ -95,9 +95,9 @@ DATABASE_URL, db_connect_args = resolve_database_url()
 
 # Ensure finite connection/read/write/pool timeouts for TiDB & MySQL
 connect_args = dict(db_connect_args)
-connect_args.setdefault("connect_timeout", 10)
-connect_args.setdefault("read_timeout", 10)
-connect_args.setdefault("write_timeout", 10)
+connect_args.setdefault("connect_timeout", 30)
+connect_args.setdefault("read_timeout", 30)
+connect_args.setdefault("write_timeout", 30)
 
 engine = create_engine(
     DATABASE_URL,

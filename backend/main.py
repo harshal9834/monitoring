@@ -61,6 +61,10 @@ app = FastAPI(
 # Global exception handler for database connectivity failures across API routes
 @app.exception_handler(OperationalError)
 async def db_operational_error_handler(request, exc: OperationalError):
+    import logging
+    logger = logging.getLogger("skillguard.database")
+    logger.exception(f"[DB OperationalError on {request.url.path}]: {exc}")
+    orig_msg = str(getattr(exc, 'orig', exc))
     return JSONResponse(
         status_code=503,
         content={"detail": "Database service is temporarily unavailable. Please try again shortly."}
@@ -68,9 +72,17 @@ async def db_operational_error_handler(request, exc: OperationalError):
 
 @app.exception_handler(DBAPIError)
 async def db_api_error_handler(request, exc: DBAPIError):
+    import logging
+    logger = logging.getLogger("skillguard.database")
+    logger.exception(f"[DBAPIError on {request.url.path}]: {exc}")
+    orig_msg = str(getattr(exc, 'orig', exc))
+    # If it is an operational/connection issue return 503, otherwise if query/schema/data error return 500
+    is_conn = any(term in orig_msg.lower() for term in ["lost connection", "can't connect", "timeout", "timed out", "closed connection"])
+    status_code = 503 if is_conn else 500
+    detail = "Database service connection interrupted. Please try again." if is_conn else "Database query execution error. Please check server logs."
     return JSONResponse(
-        status_code=503,
-        content={"detail": "Database connection error. Please try again shortly."}
+        status_code=status_code,
+        content={"detail": detail}
     )
 
 # Ensure required system and temporary processing directories exist
