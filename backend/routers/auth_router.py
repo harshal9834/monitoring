@@ -12,17 +12,27 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
 @router.post("/login")
 def login(req: LoginRequest, db: Session = Depends(get_db)):
+    print("[AUTH LOGIN] Request received", flush=True)
     identifier = (req.email or req.username or "").strip().lower()
+    print(f"[AUTH LOGIN] Email received: {identifier}", flush=True)
     if not identifier:
+        print("[AUTH LOGIN ERROR] EMAIL_OR_USERNAME_REQUIRED", flush=True)
         raise HTTPException(status_code=400, detail="Email or username is required")
 
+    print("[AUTH LOGIN] Looking up user", flush=True)
     # Search user by email or username
     user = db.query(User).filter(
         (User.email == identifier) | (User.username == identifier)
     ).first()
 
+    print("[AUTH LOGIN] User lookup complete", flush=True)
+    print(f"[AUTH LOGIN] User found: {bool(user)}", flush=True)
+
     if not user:
+        print("[AUTH LOGIN ERROR] USER_NOT_FOUND", flush=True)
         raise HTTPException(status_code=401, detail="Invalid email/username or password")
+
+    print(f"[AUTH LOGIN] Account status: {user.status}", flush=True)
 
     portal_allowed_passwords = {
         "government": ["Gov@12345", "Officer@2026", "password123", "Admin@123"],
@@ -30,6 +40,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         "admin": ["Admin@12345", "SuperAdmin@2026", "password123", "Admin@123"]
     }
 
+    print("[AUTH LOGIN] Password verification started", flush=True)
     is_valid = verify_password(req.password, user.password_hash)
     if not is_valid:
         # Also check standard seeded development portal passwords if hash check didn't match
@@ -40,35 +51,42 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
             user.password_hash = hash_password(req.password)
             db.commit()
 
+    print(f"[AUTH LOGIN] Password verification result: {is_valid}", flush=True)
     if not is_valid:
+        print("[AUTH LOGIN ERROR] INVALID_PASSWORD", flush=True)
         raise HTTPException(status_code=401, detail="Invalid email/username or password")
 
     # Statutory Portal Role Verification
     if req.portal_type == "government" and user.role not in ["GOVERNMENT_ADMIN", "MONITORING_OFFICER"]:
+        print(f"[AUTH LOGIN ERROR] ROLE_MISMATCH: User role '{user.role}' not permitted on government portal", flush=True)
         raise HTTPException(
             status_code=403,
             detail="Access Forbidden (403): This account does not possess Government Monitoring Officer credentials."
         )
 
     if req.portal_type == "centre" and user.role != "CENTRE_ADMIN":
+        print(f"[AUTH LOGIN ERROR] ROLE_MISMATCH: User role '{user.role}' not permitted on centre portal", flush=True)
         raise HTTPException(
             status_code=403,
             detail="Access Forbidden (403): This account does not possess Training Centre privileges."
         )
 
     if req.portal_type == "admin" and user.role != "SUPER_ADMIN":
+        print(f"[AUTH LOGIN ERROR] ROLE_MISMATCH: User role '{user.role}' not permitted on admin portal", flush=True)
         raise HTTPException(
             status_code=403,
             detail="Access Forbidden (403): This account is not an authorized Super Administrator."
         )
 
     if user.status == "PENDING_APPROVAL":
+        print("[AUTH LOGIN ERROR] USER_PENDING_APPROVAL", flush=True)
         raise HTTPException(
             status_code=403,
             detail="Account registration is currently PENDING APPROVAL by Government Directorate."
         )
 
     if user.status in ["SUSPENDED", "INACTIVE"]:
+        print(f"[AUTH LOGIN ERROR] USER_INACTIVE: status is {user.status}", flush=True)
         raise HTTPException(
             status_code=403,
             detail="This account has been deactivated or suspended by the Super Administrator."
@@ -86,6 +104,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
                 user.centre_id = cu.centre_id
 
         if not centre_id_to_check:
+            print("[AUTH LOGIN ERROR] CENTRE_NOT_LINKED: No centre linked to CENTRE_ADMIN account", flush=True)
             raise HTTPException(
                 status_code=403,
                 detail="403 Forbidden: Training Centre is not registered or linked to this account."
@@ -96,6 +115,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         ).first()
 
         if not centre_obj:
+            print("[AUTH LOGIN ERROR] CENTRE_RECORD_NOT_FOUND", flush=True)
             raise HTTPException(
                 status_code=403,
                 detail="403 Forbidden: Registered training centre record not found in system."
@@ -105,6 +125,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
         req_centre_id = (req.centre_id or "").strip()
         if req_centre_id:
             if req_centre_id != centre_obj.centre_code and req_centre_id != centre_obj.id:
+                print(f"[AUTH LOGIN ERROR] CENTRE_MISMATCH: Provided '{req_centre_id}' vs Assigned '{centre_obj.centre_code}'", flush=True)
                 raise HTTPException(
                     status_code=403,
                     detail=f"Access Denied: Provided Centre ID ({req_centre_id}) does not match this user's assigned centre ({centre_obj.centre_code})."
@@ -112,6 +133,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
         # Check Centre Status (Section 13: Deactivated Centre)
         if centre_obj.status in ["INACTIVE", "SUSPENDED", "DEACTIVATED"]:
+            print(f"[AUTH LOGIN ERROR] CENTRE_INACTIVE: status is {centre_obj.status}", flush=True)
             raise HTTPException(
                 status_code=403,
                 detail="This centre account is currently inactive. Please contact the administrator."
@@ -131,6 +153,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
     db.commit()
 
+    print("[AUTH LOGIN] JWT generation started", flush=True)
     primary_centre_code = centre_obj.centre_code if centre_obj else None
     token_payload = {
         "sub": user.id,
@@ -143,6 +166,7 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     }
     access_token = create_access_token(token_payload)
     refresh_token = create_refresh_token(token_payload)
+    print("[AUTH LOGIN] Login successful", flush=True)
 
     user_dict = {
         "id": user.id,
@@ -218,16 +242,17 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
         db.add(new_user)
         db.flush()
 
-        if req.role == "CENTRE_ADMIN" and req.centre_code:
+        if req.role == "CENTRE_ADMIN":
+            c_code = (req.centre_code or f"TC-{int(datetime.utcnow().timestamp()) % 10000:04d}").strip()
             # Check if centre exists or create centre shell
-            centre = db.query(TrainingCentre).filter(TrainingCentre.centre_code == req.centre_code).first()
+            centre = db.query(TrainingCentre).filter(TrainingCentre.centre_code == c_code).first()
             if not centre:
                 c_id = f"tc_{int(datetime.utcnow().timestamp())}"
-                print(f"[AUTH REGISTER] Creating training centre shell: {c_id} ({req.centre_code})", flush=True)
+                print(f"[AUTH REGISTER] Creating training centre shell: {c_id} ({c_code})", flush=True)
                 centre = TrainingCentre(
                     id=c_id,
-                    centre_code=req.centre_code,
-                    name=req.centre_name or f"Skill Centre ({req.centre_code})",
+                    centre_code=c_code,
+                    name=req.centre_name or f"Skill Centre ({c_code})",
                     address="Accredited Facility",
                     district=req.district or "Pune",
                     state="Maharashtra",
@@ -236,6 +261,7 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
                 )
                 db.add(centre)
                 db.flush()
+            new_user.centre_id = centre.id
             db.add(CentreUser(centre_id=centre.id, user_id=user_id, is_primary_contact=True))
 
         db.commit()

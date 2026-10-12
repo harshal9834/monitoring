@@ -140,7 +140,6 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
                     setEmail('government@skillguard.ai');
                     setPassword('Gov@12345');
                   } else if (portalType === 'centre') {
-                    setCentreId('DEMO-TC-0001');
                     setEmail('centre@skillguard.ai');
                     setPassword('Centre@12345');
                   } else {
