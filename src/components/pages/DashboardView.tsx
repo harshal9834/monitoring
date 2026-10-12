@@ -33,32 +33,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [attendance, setAttendance] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState<boolean>(true);
 
+  const [fetchError, setFetchError] = React.useState<string | null>(null);
+
   const currentUser = appState.currentUser;
 
   React.useEffect(() => {
     let isMounted = true;
     const fetchDashboardData = async (isInitial = false) => {
       try {
-        if (isInitial) setIsLoading(true);
-        const [sumRes, centresRes, alertsRes, actionsRes, attRes] = await Promise.all([
-          api.getGovernmentSummary().catch(() => null),
-          api.getCentres().catch(() => []),
-          api.getAlerts().catch(() => []),
-          api.getActions().catch(() => []),
-          api.getAttendance().catch(() => []),
-        ]);
-
-        if (isMounted) {
-          if (sumRes) setSummaryData(sumRes);
-          setCentres(centresRes || []);
-          setAlerts(alertsRes || []);
-          setActions(actionsRes || []);
-          setAttendance(attRes || []);
-          if (isInitial) setIsLoading(false);
+        if (isInitial) {
+          setIsLoading(true);
+          setFetchError(null);
         }
-      } catch (err) {
-        console.warn('Dashboard fetch error:', err);
-        if (isMounted && isInitial) setIsLoading(false);
+        
+        // Primary source of truth is getGovernmentSummary()
+        const sumRes = await api.getGovernmentSummary();
+        
+        if (isMounted && sumRes) {
+          setSummaryData(sumRes);
+          setFetchError(null);
+        }
+      } catch (err: any) {
+        console.error('Dashboard primary fetch error:', err);
+        if (isMounted) {
+          setFetchError(err?.message || 'Unable to load live dashboard summary from database');
+        }
+      } finally {
+        if (isMounted && isInitial) {
+          setIsLoading(false);
+        }
       }
     };
 
@@ -131,6 +134,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </button>
         </div>
       </div>
+
+      {fetchError && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between text-rose-800 text-xs">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{fetchError}</span>
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-3 py-1 bg-white border border-rose-300 rounded-lg font-semibold hover:bg-rose-100 transition-colors"
+          >
+            Retry Connection
+          </button>
+        </div>
+      )}
 
       {/* Top 4 Required Government Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func, or_
 from datetime import datetime, timedelta
 from typing import Optional, List
@@ -27,9 +27,13 @@ def get_dashboard_summary(
     current_user: User = Depends(require_roles(["GOVERNMENT_ADMIN", "MONITORING_OFFICER", "SUPER_ADMIN"])),
     db: Session = Depends(get_db)
 ):
-    # Dynamic calculations from MySQL database records
-    total_centres = db.query(func.count(TrainingCentre.id)).scalar() or 0
-    active_centres = db.query(func.count(TrainingCentre.id)).filter(TrainingCentre.status == "ACTIVE").scalar() or 0
+    # Dynamic calculations from MySQL database records with aggregated queries
+    centre_agg = db.query(
+        func.count(TrainingCentre.id),
+        func.sum(func.if_(TrainingCentre.status == "ACTIVE", 1, 0))
+    ).first()
+    total_centres = centre_agg[0] or 0
+    active_centres = int(centre_agg[1] or 0)
 
     # Pending AI analysis: submissions with status SUBMITTED or PENDING_ANALYSIS or jobs with PENDING/PROCESSING
     pending_analysis = db.query(func.count(AttendanceSubmission.id)).filter(
@@ -40,53 +44,74 @@ def get_dashboard_summary(
         pending_jobs = db.query(func.count(VideoJob.id)).filter(VideoJob.status.in_(["PENDING", "PROCESSING"])).scalar() or 0
         pending_analysis = max(pending_analysis, pending_jobs)
 
-    # Active issues / alerts
-    active_issues = db.query(func.count(Alert.id)).filter(
-        Alert.status.in_(["NEW", "ACTION_CREATED", "INVESTIGATING", "OPEN"]),
-        Alert.is_deleted == False
-    ).scalar() or 0
-    critical_alerts = db.query(func.count(Alert.id)).filter(
-        Alert.severity == "CRITICAL",
-        Alert.status != "RESOLVED",
-        Alert.is_deleted == False
-    ).scalar() or 0
+    # Active issues / alerts in a single aggregated roundtrip
+    alert_agg = db.query(
+        func.sum(func.if_(Alert.status.in_(["NEW", "ACTION_CREATED", "INVESTIGATING", "OPEN"]), 1, 0)),
+        func.sum(func.if_((Alert.severity == "CRITICAL") & (Alert.status != "RESOLVED"), 1, 0))
+    ).filter(Alert.is_deleted == False).first()
+    active_issues = int(alert_agg[0] or 0)
+    critical_alerts = int(alert_agg[1] or 0)
 
-    # Pending actions / notices
-    pending_actions = db.query(func.count(Action.id)).filter(
-        Action.status.notin_(["RESOLVED", "REJECTED", "CANCELLED"]),
-        Action.is_deleted == False
-    ).scalar() or 0
-    overdue_actions = db.query(func.count(Action.id)).filter(
-        Action.is_overdue == True,
-        Action.is_deleted == False
-    ).scalar() or 0
+    # Pending actions / notices in a single aggregated roundtrip
+    action_agg = db.query(
+        func.sum(func.if_(Action.status.notin_(["RESOLVED", "REJECTED", "CANCELLED"]), 1, 0)),
+        func.sum(func.if_(Action.is_overdue == True, 1, 0))
+    ).filter(Action.is_deleted == False).first()
+    pending_actions = int(action_agg[0] or 0)
+    overdue_actions = int(action_agg[1] or 0)
 
-    online_cameras = db.query(func.count(Camera.id)).filter(Camera.status == "CONNECTED").scalar() or 0
-    total_cameras = db.query(func.count(Camera.id)).scalar() or 0
+    cam_agg = db.query(
+        func.count(Camera.id),
+        func.sum(func.if_(Camera.status == "CONNECTED", 1, 0))
+    ).first()
+    total_cameras = cam_agg[0] or 0
+    online_cameras = int(cam_agg[1] or 0)
+
     scheduled_inspections = db.query(func.count(Inspection.id)).filter(Inspection.status == "SCHEDULED").scalar() or 0
 
     # Calculate National Compliance Index dynamically from ComplianceScore records in MySQL
     avg_compliance = db.query(func.avg(ComplianceScore.overall_score)).scalar()
     compliance_index = round(float(avg_compliance), 1) if avg_compliance is not None else 0.0
 
-    # Recent Submissions for Government Dashboard table
-    recent_subs = db.query(AttendanceSubmission).filter(
+    # Recent Submissions for Government Dashboard table (Eagerly loaded to avoid N+1 queries)
+    recent_subs = db.query(AttendanceSubmission).options(
+        joinedload(AttendanceSubmission.centre).joinedload(TrainingCentre.category),
+        joinedload(AttendanceSubmission.batch),
+        joinedload(AttendanceSubmission.ai_result)
+    ).filter(
         AttendanceSubmission.is_deleted == False
     ).order_by(AttendanceSubmission.submitted_at.desc()).limit(10).all()
+
+    sub_ids = [s.id for s in recent_subs]
+    centre_ids = list(set([s.centre_id for s in recent_subs if s.centre_id]))
+    
+    # Batch pre-fetch alerts and jobs
+    alerts_by_centre = {}
+    if centre_ids:
+        alerts = db.query(Alert).filter(Alert.centre_id.in_(centre_ids), Alert.is_deleted == False).all()
+        for a in alerts:
+            alerts_by_centre.setdefault(a.centre_id, []).append(a)
+
+    jobs_by_sub = {}
+    if sub_ids:
+        jobs = db.query(VideoJob).filter(VideoJob.submission_id.in_(sub_ids)).order_by(VideoJob.created_at.desc()).all()
+        for j in jobs:
+            if j.submission_id not in jobs_by_sub:
+                jobs_by_sub[j.submission_id] = j
+
     recent_submissions = []
     for s in recent_subs:
-        tc = db.query(TrainingCentre).filter(TrainingCentre.id == s.centre_id).first()
-        cat = db.query(CentreCategory).filter(CentreCategory.id == tc.category_id).first() if (tc and tc.category_id) else None
-        job = db.query(VideoJob).filter(VideoJob.submission_id == s.id).order_by(VideoJob.created_at.desc()).first()
-        if not job and s.video_id:
-            job = db.query(VideoJob).filter(VideoJob.video_id == s.video_id).first()
+        tc = s.centre
+        cat = tc.category if (tc and tc.category) else None
+        job = jobs_by_sub.get(s.id)
         
         # Check alerts for this submission
-        sub_alert = db.query(Alert).filter(Alert.centre_id == s.centre_id).first()
+        sub_alerts = alerts_by_centre.get(s.centre_id, [])
+        has_crit = any(a.severity == "CRITICAL" for a in sub_alerts)
         alert_status = "No Issue"
-        if s.status == "DISCREPANCY_CRITICAL" or (sub_alert and sub_alert.severity == "CRITICAL"):
+        if s.status == "DISCREPANCY_CRITICAL" or has_crit:
             alert_status = "Critical Issue"
-        elif s.status == "DISCREPANCY_WARNING" or sub_alert:
+        elif s.status == "DISCREPANCY_WARNING" or len(sub_alerts) > 0:
             alert_status = "Attention"
 
         recent_submissions.append({
@@ -95,7 +120,7 @@ def get_dashboard_summary(
             "centreName": tc.name if tc else "Accredited Centre",
             "centreCode": tc.centre_code if tc else "TC-CODE",
             "categoryName": cat.name if cat else "Vocational Skills",
-            "date": s.attendance_date.strftime("%Y-%m-%d") if hasattr(s.attendance_date, 'strftime') else str(s.attendance_date),
+            "date": s.attendance_date if isinstance(s.attendance_date, str) else (s.attendance_date.strftime("%Y-%m-%d") if hasattr(s.attendance_date, 'strftime') else str(s.attendance_date)),
             "reportedAttendance": s.total_present or 0,
             "aiStatus": "COMPLETED" if (s.ai_result or (job and job.status == "COMPLETED")) else (
                 "PROCESSING" if (job and job.status == "PROCESSING") else "PENDING"
@@ -138,7 +163,11 @@ def get_centres(
     current_user: User = Depends(require_roles(["GOVERNMENT_ADMIN", "MONITORING_OFFICER", "SUPER_ADMIN"])),
     db: Session = Depends(get_db)
 ):
-    query = db.query(TrainingCentre)
+    query = db.query(TrainingCentre).options(
+        joinedload(TrainingCentre.category),
+        selectinload(TrainingCentre.approved_assets),
+        selectinload(TrainingCentre.compliance_scores)
+    )
     if search:
         s_term = f"%{search}%"
         query = query.filter(or_(
@@ -154,39 +183,66 @@ def get_centres(
         query = query.filter(TrainingCentre.status == status_filter)
 
     centres = query.all()
+    c_ids = [c.id for c in centres]
+
+    # Pre-fetch latest submissions for all centres in one query
+    latest_subs_by_centre = {}
+    if c_ids:
+        all_subs = db.query(AttendanceSubmission).options(
+            joinedload(AttendanceSubmission.ai_result)
+        ).filter(
+            AttendanceSubmission.centre_id.in_(c_ids),
+            AttendanceSubmission.is_deleted == False
+        ).order_by(AttendanceSubmission.submitted_at.desc()).all()
+        for sub in all_subs:
+            if sub.centre_id not in latest_subs_by_centre:
+                latest_subs_by_centre[sub.centre_id] = sub
+
+    # Pre-fetch alerts count by centre in one query
+    alerts_count_by_centre = {}
+    if c_ids:
+        alert_counts = db.query(
+            Alert.centre_id,
+            func.count(Alert.id)
+        ).filter(
+            Alert.centre_id.in_(c_ids),
+            Alert.is_deleted == False
+        ).group_by(Alert.centre_id).all()
+        for cid, count in alert_counts:
+            alerts_count_by_centre[cid] = count
+
     results = []
     for c in centres:
         # Get dynamic scores and category
-        score = db.query(ComplianceScore).filter(ComplianceScore.centre_id == c.id).first()
-        approved_assets = db.query(ApprovedAsset).filter(ApprovedAsset.centre_id == c.id).all()
-        assets_dict = {a.asset_type_id: a.approved_quantity for a in approved_assets}
-        cat = db.query(CentreCategory).filter(CentreCategory.id == c.category_id).first() if c.category_id else None
+        score = c.compliance_scores[0] if (c.compliance_scores and len(c.compliance_scores) > 0) else None
+        assets_dict = {a.asset_type_id: a.approved_quantity for a in (c.approved_assets or [])}
+        cat = c.category
 
         # Latest submission
-        latest_sub = db.query(AttendanceSubmission).filter(AttendanceSubmission.centre_id == c.id).order_by(AttendanceSubmission.submitted_at.desc()).first()
-        job = None
-        if latest_sub:
-            job = db.query(VideoJob).filter(VideoJob.submission_id == latest_sub.id).order_by(VideoJob.created_at.desc()).first()
-            if not job and latest_sub.video_id:
-                job = db.query(VideoJob).filter(VideoJob.video_id == latest_sub.video_id).first()
-
-        alerts_count = db.query(Alert).filter(Alert.centre_id == c.id, Alert.is_deleted == False).count()
+        latest_sub = latest_subs_by_centre.get(c.id)
+        alerts_count = alerts_count_by_centre.get(c.id, 0)
         issue_status = "No Issues"
         if latest_sub and latest_sub.status == "DISCREPANCY_CRITICAL":
             issue_status = "Critical Issue"
         elif alerts_count > 0:
             issue_status = f"{alerts_count} Flagged"
 
-        ai_status = "COMPLETED" if (latest_sub and (latest_sub.ai_result or (job and job.status == "COMPLETED"))) else (
-            "PROCESSING" if (job and job.status == "PROCESSING") else ("PENDING" if latest_sub else "NO_SUBMISSION")
+        ai_status = "COMPLETED" if (latest_sub and latest_sub.ai_result) else (
+            "PENDING" if latest_sub else "NO_SUBMISSION"
         )
 
         results.append({
             "id": c.id,
+            "center_id": c.id,
+            "centre_id": c.id,
+            "name": c.name,
+            "center_name": c.name,
+            "centre_name": c.name,
+            "code": c.centre_code,
+            "center_code": c.centre_code,
+            "centre_code": c.centre_code,
             "alertsCount": alerts_count,
             "issuesCount": alerts_count,
-            "name": c.name,
-            "code": c.centre_code,
             "categoryId": c.category_id,
             "categoryName": cat.name if cat else "Vocational Skills",
             "address": c.address,
@@ -197,6 +253,7 @@ def get_centres(
             "contactNumber": c.contact_number,
             "email": c.email,
             "status": "COMPLIANT" if (score and score.overall_score >= 85) else ("ATTENTION_REQUIRED" if (score and score.overall_score >= 70) else "CRITICAL"),
+            "operational_status": c.status,
             "approvedTraineeCapacity": c.approved_capacity,
             "approvedInventory": {
                 "computers": assets_dict.get("computers", 20),
@@ -210,11 +267,11 @@ def get_centres(
             "infrastructureComplianceRate": round(score.infrastructure_score, 0) if score else 85,
             "actionComplianceRate": round(score.action_score, 0) if score else 82,
             "cameraStatus": c.camera_status,
-            "latestSubmissionDate": latest_sub.attendance_date.strftime("%Y-%m-%d") if (latest_sub and hasattr(latest_sub.attendance_date, 'strftime')) else (str(latest_sub.attendance_date) if latest_sub else None),
+            "latestSubmissionDate": latest_sub.attendance_date if (latest_sub and isinstance(latest_sub.attendance_date, str)) else (latest_sub.attendance_date.strftime("%Y-%m-%d") if (latest_sub and hasattr(latest_sub.attendance_date, 'strftime')) else (str(latest_sub.attendance_date) if latest_sub else None)),
             "latestSubmissionId": latest_sub.id if latest_sub else None,
             "aiStatus": ai_status,
             "issueStatus": issue_status,
-            "targetAnalysisId": job.id if job else (latest_sub.id if latest_sub else None),
+            "targetAnalysisId": latest_sub.id if latest_sub else None,
             "lastInspectionDate": c.last_inspection_date.strftime("%Y-%m-%d") if c.last_inspection_date else "2026-09-20",
             "nextInspectionDate": c.next_inspection_date.strftime("%Y-%m-%d") if c.next_inspection_date else "2026-11-20"
         })
@@ -309,25 +366,49 @@ def get_submissions(
     current_user: User = Depends(require_roles(["GOVERNMENT_ADMIN", "MONITORING_OFFICER", "SUPER_ADMIN"])),
     db: Session = Depends(get_db)
 ):
-    submissions = db.query(AttendanceSubmission).filter(AttendanceSubmission.is_deleted == False).order_by(AttendanceSubmission.submitted_at.desc()).all()
+    submissions = db.query(AttendanceSubmission).options(
+        joinedload(AttendanceSubmission.centre).joinedload(TrainingCentre.category),
+        joinedload(AttendanceSubmission.batch),
+        joinedload(AttendanceSubmission.ai_result),
+        joinedload(AttendanceSubmission.video)
+    ).filter(
+        AttendanceSubmission.is_deleted == False
+    ).order_by(AttendanceSubmission.submitted_at.desc()).all()
+
+    sub_ids = [sub.id for sub in submissions]
+    centre_ids = list(set([sub.centre_id for sub in submissions if sub.centre_id]))
+
+    # Batch load jobs
+    jobs_by_sub = {}
+    if sub_ids:
+        jobs = db.query(VideoJob).filter(VideoJob.submission_id.in_(sub_ids)).order_by(VideoJob.created_at.desc()).all()
+        for j in jobs:
+            if j.submission_id not in jobs_by_sub:
+                jobs_by_sub[j.submission_id] = j
+
+    # Batch load alerts for centres
+    alerts_by_centre = {}
+    if centre_ids:
+        alerts = db.query(Alert).filter(Alert.centre_id.in_(centre_ids), Alert.is_deleted == False).all()
+        for a in alerts:
+            alerts_by_centre.setdefault(a.centre_id, []).append(a)
+
     results = []
     for sub in submissions:
-        centre = db.query(TrainingCentre).filter(TrainingCentre.id == sub.centre_id).first()
-        cat = db.query(CentreCategory).filter(CentreCategory.id == centre.category_id).first() if (centre and centre.category_id) else None
-        batch = db.query(CentreBatch).filter(CentreBatch.id == sub.batch_id).first()
+        centre = sub.centre
+        cat = centre.category if (centre and centre.category) else None
+        batch = sub.batch
         ai = sub.ai_result
-        video = db.query(Video).filter(Video.id == sub.video_id).first() if sub.video_id else None
-        job = db.query(VideoJob).filter(VideoJob.submission_id == sub.id).order_by(VideoJob.created_at.desc()).first()
-        if not job and sub.video_id:
-            job = db.query(VideoJob).filter(VideoJob.video_id == sub.video_id).first()
+        video = sub.video
+        job = jobs_by_sub.get(sub.id)
 
         # Check linked or centre alert
-        sub_alert = db.query(Alert).filter(Alert.centre_id == sub.centre_id).order_by(Alert.created_at.desc()).first()
-        has_issue = sub.status in ["DISCREPANCY_CRITICAL", "DISCREPANCY_WARNING"] or (sub_alert and sub_alert.status != "RESOLVED")
+        sub_alerts = alerts_by_centre.get(sub.centre_id, [])
+        has_issue = sub.status in ["DISCREPANCY_CRITICAL", "DISCREPANCY_WARNING"] or any(a.status != "RESOLVED" for a in sub_alerts)
         issue_label = "Issue Detected" if has_issue else "No Issue"
 
         ai_status = "COMPLETED" if (ai or (job and job.status == "COMPLETED")) else (
-            "PROCESSING" if (job and job.status == "PROCESSING") else ("PENDING" if sub.video_id else "NO_VIDEO")
+            "PROCESSING" if (job and job.status == "PROCESSING") else ("PENDING" if (sub.video_id or sub.video_path) else "NO_VIDEO")
         )
 
         results.append({
@@ -339,14 +420,14 @@ def get_submissions(
             "categoryName": cat.name if cat else "Vocational Skills",
             "batchCode": batch.batch_code if batch else "BATCH-01",
             "courseName": batch.course_name if batch else "Vocational Course",
-            "date": sub.attendance_date.strftime("%Y-%m-%d") if hasattr(sub.attendance_date, 'strftime') else str(sub.attendance_date),
+            "date": sub.attendance_date if isinstance(sub.attendance_date, str) else (sub.attendance_date.strftime("%Y-%m-%d") if hasattr(sub.attendance_date, 'strftime') else str(sub.attendance_date)),
             "sessionStartTime": sub.start_time or "09:00 AM",
             "sessionEndTime": sub.end_time or "01:00 PM",
             "instructorName": sub.instructor_name or "Trainer",
-            "reportedTrainees": sub.total_present or 40,
-            "totalRegistered": sub.total_registered or 40,
-            "totalPresent": sub.total_present or 40,
-            "totalAbsent": sub.total_absent if sub.total_absent is not None else max(0, (sub.total_registered or 40) - (sub.total_present or 40)),
+            "reportedTrainees": sub.total_present or 0,
+            "totalRegistered": sub.total_registered or 0,
+            "totalPresent": sub.total_present or 0,
+            "totalAbsent": sub.total_absent if sub.total_absent is not None else max(0, (sub.total_registered or 0) - (sub.total_present or 0)),
             "infrastructureReported": sub.infrastructure_reported or {},
             "hasVideo": bool(sub.video_id or sub.video_path),
             "videoId": sub.video_id,

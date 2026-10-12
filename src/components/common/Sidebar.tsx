@@ -98,7 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     camerasCount: 0,
     complianceIndex: 82,
     todaySubmitted: false,
-    centreCode: 'MH-PUN-TC-0842',
+    centreCode: '',
     unreadNotifs: 0,
     pendingNotices: 0,
   });
@@ -118,7 +118,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 camerasCount: 0,
                 complianceIndex: 0,
                 todaySubmitted: Boolean(sum.isSubmittedToday || sum.todaySubmissionStatus === 'Submitted'),
-                centreCode: sum.centreCode || 'MH-PUN-TC-0842',
+                centreCode: sum.centreCode || '',
                 unreadNotifs: sum.unreadNotificationsCount || 0,
                 pendingNotices: sum.pendingNoticesCount || 0,
               });
