@@ -1,19 +1,76 @@
 import os
 import json
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Optional
 from fastapi import FastAPI, Depends, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import DBAPIError, OperationalError
 
-from backend.database import engine, Base, get_db, safe_init_db_schema
+from backend.database import engine, Base, get_db, safe_init_db_schema, db_status_info
 from backend.routers import auth_router, government_router, centre_router, admin_router, video_router, submissions_router
+
+
+async def init_db_background():
+    """
+    Runs database schema check & initialization in the background after the server starts.
+    Bounded retry to prevent infinite looping. Server remains fully responsive throughout.
+    """
+    max_retries = 3
+    retry_delay_seconds = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"[Database Background Init] Attempt {attempt}/{max_retries}...")
+            # Run blocking database calls in a thread pool to avoid blocking the event loop
+            success = await asyncio.to_thread(safe_init_db_schema)
+            if success:
+                print(f"[Database Background Init] Schema successfully initialized/verified on attempt {attempt}.")
+                return
+            else:
+                print(f"[Database Background Init] Schema check returned False on attempt {attempt}.")
+        except Exception as e:
+            print(f"[Database Background Init] Attempt {attempt} failed: {e}")
+
+        if attempt < max_retries:
+            await asyncio.sleep(retry_delay_seconds)
+
+    print("[Database Background Init] Bounded retries completed. Backend running in resilient mode.")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Lightweight startup: launch DB verification in background so Uvicorn binds port immediately
+    bg_task = asyncio.create_task(init_db_background())
+    yield
+    # Shutdown logic if needed
+    if not bg_task.done():
+        bg_task.cancel()
+
 
 app = FastAPI(
     title="SkillGuard AI Enterprise API",
     description="AI-Powered Training Centre Compliance & Monitoring Platform (MySQL 8.0+ Backend)",
-    version="2.4.0"
+    version="2.4.0",
+    lifespan=lifespan
 )
+
+# Global exception handler for database connectivity failures across API routes
+@app.exception_handler(OperationalError)
+async def db_operational_error_handler(request, exc: OperationalError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database service is temporarily unavailable. Please try again shortly."}
+    )
+
+@app.exception_handler(DBAPIError)
+async def db_api_error_handler(request, exc: DBAPIError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database connection error. Please try again shortly."}
+    )
 
 # Ensure required system and temporary processing directories exist
 os.makedirs("storage/evidence", exist_ok=True)
@@ -25,9 +82,6 @@ os.makedirs("storage/cloud_media", exist_ok=True)
 
 # Mount local storage as static files for snapshots and temporary caching
 app.mount("/storage", StaticFiles(directory="storage"), name="storage")
-
-# Production-safe database schema check & initialization
-safe_init_db_schema()
 
 # CORS Middleware (Explicit origins for production security)
 raw_origins = os.getenv("CORS_ORIGINS", "")
@@ -104,20 +158,21 @@ def stream_media_by_public_id(
 
 # Health Check (Live TiDB / MySQL Connectivity Ping)
 @app.get("/api/health")
-def health_check(db: Session = Depends(get_db)):
+def health_check():
     from sqlalchemy import text
     try:
-        db.execute(text("SELECT 1"))
-        db_status = "Connected"
-        status_label = "HEALTHY"
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        db_status = "connected"
+        overall_status = "ok"
     except Exception as e:
-        db_status = f"Disconnected ({str(e)})"
-        status_label = "DEGRADED"
+        db_status = "unavailable"
+        overall_status = "degraded"
 
     return {
-        "status": status_label,
+        "status": overall_status,
+        "database": db_status,
         "service": "SkillGuard AI Enterprise Platform",
-        "database": f"MySQL 8.0+ {db_status}",
         "inference_engine": "Ultralytics YOLOv8m (15fps Active)",
         "version": "2.4.0"
     }
@@ -153,4 +208,5 @@ async def websocket_telemetry(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True, reload_dirs=["backend"])
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=port, reload=True, reload_dirs=["backend"])

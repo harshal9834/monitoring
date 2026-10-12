@@ -70,8 +70,12 @@ def resolve_database_url() -> tuple[str, dict]:
 
         db_url_str = raw_url
 
-    # 3. Configure SSL/TLS parameters
-    connect_args = {}
+    # 3. Configure SSL/TLS and connection timeouts (safe for PyMySQL / TiDB)
+    connect_args = {
+        "connect_timeout": 10,
+        "read_timeout": 10,
+        "write_timeout": 10
+    }
     is_tidb = "tidbcloud.com" in db_url_str
     ssl_required = is_tidb or os.getenv("DB_SSL", "false").lower() in ("true", "1", "yes")
 
@@ -104,6 +108,14 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+# Module-level tracking for database readiness
+db_status_info = {
+    "initialized": False,
+    "last_check_status": "untested",
+    "last_error": None
+}
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -112,13 +124,14 @@ def get_db():
         db.close()
 
 
-def safe_init_db_schema():
+def safe_init_db_schema() -> bool:
     """
     Production-safe database schema initialization.
-    - Verifies connectivity with SELECT 1.
+    - First verifies connectivity with SELECT 1.
     - Inspects existing tables. If tables already exist, does NOT execute redundant CREATE TABLE (DDL).
     - If tables are missing and AUTO_CREATE_TABLES is enabled, creates missing tables.
     - Never drops, alters, or resets existing production data.
+    - Captures errors gracefully without raising exceptions.
     """
     try:
         with engine.connect() as conn:
@@ -129,6 +142,9 @@ def safe_init_db_schema():
 
         if "roles" in existing_tables and "users" in existing_tables:
             print(f"[Database Init] Schema verified: {len(existing_tables)} tables present in database.")
+            db_status_info["initialized"] = True
+            db_status_info["last_check_status"] = "connected"
+            db_status_info["last_error"] = None
             return True
 
         auto_create = os.getenv("AUTO_CREATE_TABLES", "true").lower() in ("true", "1", "yes")
@@ -137,13 +153,22 @@ def safe_init_db_schema():
             from backend.models import models
             Base.metadata.create_all(bind=engine)
             print("[Database Init] Tables created successfully.")
+            db_status_info["initialized"] = True
+            db_status_info["last_check_status"] = "connected"
+            db_status_info["last_error"] = None
             return True
         else:
             print("[Database Init] Schema auto-creation disabled (AUTO_CREATE_TABLES=false).")
+            db_status_info["initialized"] = True
+            db_status_info["last_check_status"] = "connected"
+            db_status_info["last_error"] = None
             return False
 
     except Exception as e:
         err_msg = str(e)
+        db_status_info["initialized"] = False
+        db_status_info["last_check_status"] = "unavailable"
+        db_status_info["last_error"] = err_msg
         if "1142" in err_msg or "command denied" in err_msg.lower():
             print(
                 "[Database Init Notice] TiDB/MySQL user does not have DDL CREATE privileges on this schema.\n"
@@ -153,12 +178,20 @@ def safe_init_db_schema():
         else:
             print(f"[Database Init Notice] Connectivity check: {err_msg}")
         return False
-print(
-    "[DB CONFIG] "
-    f"host={os.getenv('DB_HOST')} "
-    f"port={os.getenv('DB_PORT')} "
-    f"user={os.getenv('DB_USER')} "
-    f"database={os.getenv('DB_NAME')} "
-    f"password_set={bool(os.getenv('DB_PASSWORD'))} "
-    f"password_length={len(os.getenv('DB_PASSWORD', ''))}"
-)
+
+
+def print_db_config_summary():
+    """Diagnostic logging helper. Never prints DB_PASSWORD."""
+    print(
+        "[DB CONFIG] "
+        f"host={os.getenv('DB_HOST')} "
+        f"port={os.getenv('DB_PORT')} "
+        f"user={os.getenv('DB_USER')} "
+        f"database={os.getenv('DB_NAME')} "
+        f"password_set={bool(os.getenv('DB_PASSWORD'))} "
+        f"password_length={len(os.getenv('DB_PASSWORD', ''))}"
+    )
+
+
+# Print non-sensitive configuration diagnostics at import time
+print_db_config_summary()
