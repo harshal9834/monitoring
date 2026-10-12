@@ -153,3 +153,12 @@ def safe_init_db_schema():
         else:
             print(f"[Database Init Notice] Connectivity check: {err_msg}")
         return False
+print(
+    "[DB CONFIG] "
+    f"host={os.getenv('DB_HOST')} "
+    f"port={os.getenv('DB_PORT')} "
+    f"user={os.getenv('DB_USER')} "
+    f"database={os.getenv('DB_NAME')} "
+    f"password_set={bool(os.getenv('DB_PASSWORD'))} "
+    f"password_length={len(os.getenv('DB_PASSWORD', ''))}"
+)
