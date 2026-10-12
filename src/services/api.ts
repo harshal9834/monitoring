@@ -252,7 +252,7 @@ export const api = {
     const token = getAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(`/api/centre/notices/${noticeId}/upload-response`, {
+    const res = await fetch(`${API_BASE}/centre/notices/${noticeId}/upload-response`, {
       method: 'POST',
       headers,
       body: formData,
@@ -389,7 +389,7 @@ export const api = {
     const token = getAuthToken();
     const headers: Record<string, string> = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch('/api/video/upload', {
+    const res = await fetch(`${API_BASE}/video/upload`, {
       method: 'POST',
       headers,
       body: formData,

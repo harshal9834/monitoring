@@ -536,55 +536,78 @@ def submit_centre_notice_response(
     db: Session = Depends(get_db)
 ):
     centre_id = get_centre_id_for_user(current_user, db)
-    action = db.query(Action).filter(Action.id == notice_id, Action.centre_id == centre_id).first()
+    
+    # Verify notice exists
+    action = db.query(Action).filter(Action.id == notice_id).first()
     if not action:
-        raise HTTPException(status_code=404, detail="Notice item not found for your centre")
+        raise HTTPException(status_code=404, detail="Notice item not found")
+
+    # Strict centre isolation: verify notice belongs to current_user.centre_id
+    if action.centre_id != centre_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to respond to this notice")
 
     if action.status in ["RESOLVED", "VERIFIED"]:
         raise HTTPException(status_code=400, detail="Notice has already been resolved.")
 
-    # Remove existing response if any to allow resubmission
-    existing_resp = db.query(ActionResponse).filter(ActionResponse.action_id == action.id).first()
-    if existing_resp:
-        db.delete(existing_resp)
-        db.flush()
+    try:
+        # Remove existing response if any to allow resubmission
+        existing_resp = db.query(ActionResponse).filter(ActionResponse.action_id == action.id).first()
+        if existing_resp:
+            db.delete(existing_resp)
+            db.flush()
 
-    resp = ActionResponse(
-        action_id=action.id,
-        submitted_by=f"{current_user.name} ({current_user.designation or 'Centre Admin'})",
-        explanation=req.explanation,
-        proof_document_name=req.proof_document_name or "Compliance_Explanation_Document.pdf",
-        proof_photo_url=req.proof_photo_url
-    )
-    db.add(resp)
-    action.status = "SUBMITTED_FOR_VERIFICATION"
+        resp = ActionResponse(
+            action_id=action.id,
+            submitted_by=f"{current_user.name} ({current_user.designation or 'Centre Admin'})",
+            explanation=req.explanation,
+            proof_document_name=req.proof_document_name or "Compliance_Explanation_Document.pdf",
+            proof_photo_url=req.proof_photo_url
+        )
+        db.add(resp)
+        action.status = "SUBMITTED_FOR_VERIFICATION"
 
-    timeline = ActionTimeline(
-        action_id=action.id,
-        event_type="RESPONSE_SUBMITTED",
-        description=f"Centre submitted explanation and supporting documentation: '{req.explanation[:90]}...'",
-        performed_by=current_user.name
-    )
-    db.add(timeline)
+        timeline = ActionTimeline(
+            action_id=action.id,
+            event_type="RESPONSE_SUBMITTED",
+            description=f"Centre submitted explanation: '{req.explanation[:90]}...'",
+            performed_by=current_user.name
+        )
+        db.add(timeline)
 
-    # Insert official Notification for Government Officers
-    officers = db.query(User).filter(User.role.in_(["GOVERNMENT_ADMIN", "MONITORING_OFFICER"])).all()
-    centre = db.query(TrainingCentre).filter(TrainingCentre.id == centre_id).first()
-    c_name = centre.name if centre else "Training Centre"
-    for off in officers:
-        db.add(Notification(
-            id=f"notif_{uuid.uuid4().hex[:12]}",
-            user_id=off.id,
-            type="RESPONSE_SUBMITTED",
-            title=f"Response Received: {action.action_number}",
-            message=f"{c_name} has submitted explanation & evidence for {action.action_number}.",
+        # Insert official Notifications for Government Officers
+        officers = db.query(User).filter(User.role.in_(["GOVERNMENT_ADMIN", "MONITORING_OFFICER"])).all()
+        centre = db.query(TrainingCentre).filter(TrainingCentre.id == centre_id).first()
+        c_name = centre.name if centre else "Training Centre"
+        for off in officers:
+            db.add(Notification(
+                id=f"notif_{uuid.uuid4().hex[:12]}",
+                user_id=off.id,
+                type="RESPONSE_SUBMITTED",
+                title=f"Response Received: {action.action_number}",
+                message=f"{c_name} has submitted explanation & evidence for {action.action_number}.",
+                entity_type="ACTION",
+                entity_id=action.id,
+                is_read=False
+            ))
+
+        # Audit log event
+        db.add(AuditLog(
+            id=f"audit_{uuid.uuid4().hex[:12]}",
+            user_id=current_user.id,
+            user_name=current_user.name,
+            role=current_user.role,
+            action="SUBMIT_NOTICE_RESPONSE",
             entity_type="ACTION",
             entity_id=action.id,
-            is_read=False
+            old_value=None,
+            new_value=json.dumps({"explanation": req.explanation[:100], "proof": req.proof_document_name})
         ))
 
-    db.commit()
-    return {"success": True, "message": "Notice response submitted successfully for Government verification"}
+        db.commit()
+        return {"success": True, "message": "Notice response submitted successfully for Government verification"}
+    except Exception as e:
+        db.rollback()
+        raise e
 
 @router.post("/notices/{notice_id}/upload-response")
 async def upload_centre_notice_response_multipart(
@@ -595,9 +618,18 @@ async def upload_centre_notice_response_multipart(
     db: Session = Depends(get_db)
 ):
     centre_id = get_centre_id_for_user(current_user, db)
-    action = db.query(Action).filter(Action.id == notice_id, Action.centre_id == centre_id).first()
+    
+    # Verify notice exists
+    action = db.query(Action).filter(Action.id == notice_id).first()
     if not action:
-        raise HTTPException(status_code=404, detail="Notice item not found for your centre")
+        raise HTTPException(status_code=404, detail="Notice item not found")
+
+    # Strict centre isolation: verify notice belongs to current_user.centre_id
+    if action.centre_id != centre_id:
+        raise HTTPException(status_code=403, detail="Forbidden: You do not have permission to respond to this notice")
+
+    if action.status in ["RESOLVED", "VERIFIED"]:
+        raise HTTPException(status_code=400, detail="Notice has already been resolved.")
 
     doc_name = None
     doc_url = None
@@ -623,31 +655,64 @@ async def upload_centre_notice_response_multipart(
         )
         doc_url = cloud_res["secure_url"]
 
-    existing_resp = db.query(ActionResponse).filter(ActionResponse.action_id == action.id).first()
-    if existing_resp:
-        db.delete(existing_resp)
-        db.flush()
+    try:
+        existing_resp = db.query(ActionResponse).filter(ActionResponse.action_id == action.id).first()
+        if existing_resp:
+            db.delete(existing_resp)
+            db.flush()
 
-    resp = ActionResponse(
-        action_id=action.id,
-        submitted_by=f"{current_user.name} ({current_user.designation or 'Centre Admin'})",
-        explanation=explanation,
-        proof_document_name=doc_name or "Explanation_Document.pdf",
-        proof_photo_url=doc_url
-    )
-    db.add(resp)
-    action.status = "SUBMITTED_FOR_VERIFICATION"
+        resp = ActionResponse(
+            action_id=action.id,
+            submitted_by=f"{current_user.name} ({current_user.designation or 'Centre Admin'})",
+            explanation=explanation,
+            proof_document_name=doc_name or "Explanation_Document.pdf",
+            proof_photo_url=doc_url
+        )
+        db.add(resp)
+        action.status = "SUBMITTED_FOR_VERIFICATION"
 
-    timeline = ActionTimeline(
-        action_id=action.id,
-        event_type="RESPONSE_SUBMITTED",
-        description=f"Centre uploaded formal response document: {doc_name or 'Response Document'}",
-        performed_by=current_user.name
-    )
-    db.add(timeline)
-    db.commit()
+        timeline = ActionTimeline(
+            action_id=action.id,
+            event_type="RESPONSE_SUBMITTED",
+            description=f"Centre uploaded formal response document: {doc_name or 'Response Document'}",
+            performed_by=current_user.name
+        )
+        db.add(timeline)
 
-    return {"success": True, "message": "Document & explanation submitted successfully"}
+        # Insert official Notification for Government Officers
+        officers = db.query(User).filter(User.role.in_(["GOVERNMENT_ADMIN", "MONITORING_OFFICER"])).all()
+        centre = db.query(TrainingCentre).filter(TrainingCentre.id == centre_id).first()
+        c_name = centre.name if centre else "Training Centre"
+        for off in officers:
+            db.add(Notification(
+                id=f"notif_{uuid.uuid4().hex[:12]}",
+                user_id=off.id,
+                type="RESPONSE_SUBMITTED",
+                title=f"Response Received: {action.action_number}",
+                message=f"{c_name} has submitted explanation & evidence for {action.action_number}.",
+                entity_type="ACTION",
+                entity_id=action.id,
+                is_read=False
+            ))
+
+        # Audit log event
+        db.add(AuditLog(
+            id=f"audit_{uuid.uuid4().hex[:12]}",
+            user_id=current_user.id,
+            user_name=current_user.name,
+            role=current_user.role,
+            action="UPLOAD_NOTICE_RESPONSE",
+            entity_type="ACTION",
+            entity_id=action.id,
+            old_value=None,
+            new_value=json.dumps({"explanation": explanation[:100], "proof_document": doc_name, "proof_url": doc_url})
+        ))
+
+        db.commit()
+        return {"success": True, "message": "Document & explanation submitted successfully for Government verification"}
+    except Exception as e:
+        db.rollback()
+        raise e
 
 @router.get("/alerts")
 def get_centre_alerts(
