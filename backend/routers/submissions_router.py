@@ -279,8 +279,11 @@ async def create_submission(
             mime_type=video_rec.mime_type,
             duration_seconds=video_duration_sec,
             cloudinary_public_id=video_public_id,
+            cloudinary_asset_id=cloud_res.get("asset_id") if "cloud_res" in locals() and cloud_res else None,
             cloudinary_url=video_secure_url,
             secure_url=video_secure_url,
+            resource_type="video",
+            format=cloud_res.get("format") if "cloud_res" in locals() and cloud_res else "mp4",
             created_at=datetime.utcnow()
         ))
 
@@ -296,8 +299,11 @@ async def create_submission(
             mime_type="image/jpeg",
             duration_seconds=0.0,
             cloudinary_public_id=img_public_id,
+            cloudinary_asset_id=cloud_img_res.get("asset_id") if "cloud_img_res" in locals() and cloud_img_res else None,
             cloudinary_url=img_secure_url,
             secure_url=img_secure_url,
+            resource_type="image",
+            format=cloud_img_res.get("format") if "cloud_img_res" in locals() and cloud_img_res else "jpg",
             created_at=datetime.utcnow()
         ))
 
