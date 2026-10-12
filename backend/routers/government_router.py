@@ -1471,15 +1471,17 @@ def get_government_ai_analysis(
         analysis = sub.image_ai_result_json
 
     # Person Analysis
-    reported_trainees = sub.total_present if sub else 40
+    reported_trainees = sub.total_present if sub else 0
     ai_estimated = (
-        analysis.get("estimated_presence") or
-        (sub.ai_result.estimated_people if (sub and sub.ai_result) else None) or
-        (sub.ai_detected_people if (sub and sub.ai_detected_people is not None) else None) or
-        (reported_trainees if not has_video and not has_image else 2)
+        analysis.get("estimated_presence")
+        if analysis.get("estimated_presence") is not None
+        else (sub.ai_result.estimated_people if (sub and sub.ai_result) else None)
     )
-    discrepancy_count = abs(reported_trainees - ai_estimated)
-    discrepancy_pct = round((discrepancy_count / max(reported_trainees, 1)) * 100, 1)
+    if ai_estimated is None and sub and sub.ai_detected_people is not None:
+        ai_estimated = sub.ai_detected_people
+
+    discrepancy_count = abs(reported_trainees - (ai_estimated or 0)) if ai_estimated is not None else 0
+    discrepancy_pct = round((discrepancy_count / max(reported_trainees, 1)) * 100, 1) if ai_estimated is not None else 0.0
 
     person_analysis = {
         "reportedAttendance": reported_trainees,

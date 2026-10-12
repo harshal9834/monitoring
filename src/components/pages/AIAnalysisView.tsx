@@ -197,10 +197,12 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
 
   // Extract closest frame detections
   const frameEvents: any[] = analysisData?.frameEvents || [];
-  const currentFrameEvent = frameEvents.reduce((prev: any, curr: any) => {
-    if (!prev) return curr;
-    return Math.abs(curr.timestamp - currentTime) < Math.abs(prev.timestamp - currentTime) ? curr : prev;
-  }, null);
+  const currentFrameEvent = frameEvents.length > 0
+    ? frameEvents.reduce((prev: any, curr: any) => {
+        if (!prev) return curr;
+        return Math.abs(curr.timestamp - currentTime) < Math.abs(prev.timestamp - currentTime) ? curr : prev;
+      }, frameEvents[0])
+    : null;
 
   const activeDetections: any[] = currentFrameEvent ? (currentFrameEvent.detections || []) : [];
 
@@ -429,11 +431,11 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
   }
 
   const pAnalysis = analysisData?.personAnalysis || {
-    reportedAttendance: 40,
-    aiEstimatedPresence: 2,
-    discrepancyCount: 38,
-    discrepancyPercentage: 95.0,
-    status: 'CRITICAL VARIANCE',
+    reportedAttendance: 0,
+    aiEstimatedPresence: 0,
+    discrepancyCount: 0,
+    discrepancyPercentage: 0,
+    status: 'NO DATA',
   };
 
   const infraList = analysisData?.infrastructureAnalysis || [];
@@ -575,9 +577,13 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                         </div>
 
                         {/* Active Persons In Bay Badge */}
-                        <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-xs border border-slate-700 px-3 py-1 rounded-lg text-xs font-bold text-white flex items-center gap-1.5">
+                        <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-xs border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold text-white flex items-center gap-2 shadow-lg">
                           <Users className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Detected: {activeDetections.filter((d: any) => d.class === 'person').length} Persons</span>
+                          <span>
+                            Visible: <span className="text-emerald-400 font-mono">{activeDetections.filter((d: any) => d.class === 'person').length}</span>
+                            <span className="text-slate-400 mx-1.5 font-normal">•</span>
+                            AI Estimate: <span className="text-indigo-300 font-mono">{pAnalysis.aiEstimatedPresence} Trainees</span>
+                          </span>
                         </div>
                       </>
                     )}
@@ -701,9 +707,9 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                           <span>IMAGE AI INFERENCE • BOUNDING BOXES & LABELS SYNCHRONIZED</span>
                         </div>
 
-                        <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-xs border border-slate-700 px-3 py-1 rounded-lg text-xs font-bold text-white flex items-center gap-1.5">
+                        <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-xs border border-slate-700 px-3 py-1 rounded-lg text-xs font-bold text-white flex items-center gap-1.5 shadow-lg">
                           <Users className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Detected: {analysisData?.personAnalysis?.aiEstimatedPresence || 0} Persons</span>
+                          <span>Detected: <span className="font-mono text-emerald-300">{pAnalysis.aiEstimatedPresence} Trainees</span></span>
                         </div>
                       </>
                     )}
@@ -756,7 +762,14 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                     )
                   )
                 ).sort((a: any, b: any) => a - b);
-                const tracksToShow = availableTracks.length > 0 ? availableTracks.slice(0, 15) : [1, 2, 3];
+                const tracksToShow = availableTracks.slice(0, 15);
+                if (tracksToShow.length === 0) {
+                  return (
+                    <div className="text-xs text-slate-400 italic py-1">
+                      No persistent person tracks registered in the current video frames.
+                    </div>
+                  );
+                }
                 return tracksToShow.map((trk: any) => {
                   const isSelected = selectedTrackId === trk;
                   return (
@@ -881,7 +894,7 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
 
             <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
               <div className="flex items-center justify-between text-xs">
-                <span className="text-rose-800 font-semibold">Discrepancy (Ghost Attendance):</span>
+                <span className="text-rose-800 font-semibold">Attendance Discrepancy / Potential Variance:</span>
                 <span className="font-bold text-rose-900 text-sm">
                   -{pAnalysis.discrepancyCount} Trainees ({pAnalysis.discrepancyPercentage}%)
                 </span>
