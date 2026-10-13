@@ -33,5 +33,3 @@ storage/cloud_media/
 # System files
 .DS_Store
 Thumbs.db
-
-.vercel
