@@ -1486,6 +1486,7 @@ def get_government_ai_analysis(
     person_analysis = {
         "reportedAttendance": reported_trainees,
         "aiEstimatedPresence": ai_estimated,
+        "aiEstimatedVisiblePersons": ai_estimated,
         "discrepancyCount": discrepancy_count,
         "discrepancyPercentage": discrepancy_pct,
         "status": "CRITICAL VARIANCE" if discrepancy_pct >= 10 else ("MINOR VARIANCE" if discrepancy_pct > 0 else "CONCORDANT")
@@ -1578,6 +1579,8 @@ def get_government_ai_analysis(
         if img_analysis.get("frame_events"):
             frame_events = img_analysis.get("frame_events", [])
 
+    resolved_model_version = analysis.get("model_version") or (job.model_version if (job and job.model_version) else "Ultralytics YOLOv8n (PyTorch)")
+
     return {
         "targetId": target_id,
         "jobId": job.id if job else None,
@@ -1600,7 +1603,7 @@ def get_government_ai_analysis(
             "duration": analysis.get("duration_seconds", 10.0),
             "fps": analysis.get("sample_fps", 5),
             "totalFrames": analysis.get("total_video_frames", 50),
-            "modelVersion": job.model_version if (job and job.model_version) else "Ultralytics YOLOv8m (PyTorch)",
+            "modelVersion": resolved_model_version,
             "averageConfidence": analysis.get("average_confidence", 0.406)
         },
         "image": {
@@ -2211,7 +2214,7 @@ def analyze_notice_evidence(
             "detectedObjects": analysis_result.get("detected_objects_summary", {}),
             "frameEvents": analysis_result.get("frame_events", []),
             "analysisTimestamp": resp.ai_completed_at.strftime("%Y-%m-%d %I:%M %p"),
-            "modelVersion": "Ultralytics YOLOv8m (PyTorch)",
+            "modelVersion": analysis_result.get("model_version") or "Ultralytics YOLOv8n (PyTorch)",
             "analysisResult": analysis_result
         }
 

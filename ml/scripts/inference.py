@@ -38,9 +38,15 @@ class SkillGuardInferenceEngine:
                     model_path = candidate
                     break
         if not model_path or not os.path.exists(model_path):
-            model_path = "yolov8m.pt"
+            model_path = "yolov8n.pt"
 
-        print(f"[SkillGuard AI] Loading YOLO Inference Weights from: {model_path}")
+        self.model_path = os.path.abspath(model_path) if (model_path and os.path.exists(model_path)) else (model_path or "yolov8n.pt")
+        self.model_filename = os.path.basename(self.model_path)
+        self.model_name = os.path.splitext(self.model_filename)[0].upper()
+        self.is_custom_trained = any(w in self.model_filename.lower() for w in ["best", "custom", "trained"])
+        self.model_version = f"Ultralytics {self.model_name} (PyTorch)"
+
+        print(f"[AI MODEL] path={self.model_path} model={self.model_name} weights={self.model_filename} version={self.model_version} custom_trained={self.is_custom_trained}")
         try:
             import torch
             torch.set_num_threads(2)
@@ -50,7 +56,14 @@ class SkillGuardInferenceEngine:
         self.classes = ["person"]
         self.unsupported = ["computer", "machine", "workbench", "chair"]
 
-    def infer_frame(self, frame_bgr, conf_thresh=0.12):
+        # Dynamically verify person class ID from loaded model
+        self.person_class_id = 0
+        for cid, cname in self.model.names.items():
+            if str(cname).lower() == "person":
+                self.person_class_id = int(cid)
+                break
+
+    def infer_frame(self, frame_bgr, conf_thresh=0.15):
         h, w = frame_bgr.shape[:2]
         try:
             import torch
@@ -80,7 +93,7 @@ class SkillGuardInferenceEngine:
 
                 cls_name = self.model.names.get(cls_id, f"class_{cls_id}").lower()
                 counts[cls_name] = counts.get(cls_name, 0) + 1
-                if cls_name == "person":
+                if cls_name == "person" or cls_id == self.person_class_id:
                     person_count += 1
 
                 detections.append({

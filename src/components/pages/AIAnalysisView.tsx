@@ -489,7 +489,7 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
               : `AI Video Analytics: ${analysisData?.centre?.name || 'Training Centre'}`}
           </h1>
           <p className="text-xs text-slate-500 mt-1">
-            Accreditation Code: <span className="font-mono font-bold text-slate-700">{analysisData?.centre?.code || 'TC-CODE'}</span> • Category: <span className="font-semibold text-indigo-700">{analysisData?.centre?.category || 'Vocational'}</span> • Model: <span className="font-mono text-slate-700">Ultralytics YOLOv8m (PyTorch)</span>
+            Accreditation Code: <span className="font-mono font-bold text-slate-700">{analysisData?.centre?.code || 'TC-CODE'}</span> • Category: <span className="font-semibold text-indigo-700">{analysisData?.centre?.category || 'Vocational'}</span> • Model: <span className="font-mono text-slate-700">{analysisData?.video?.modelVersion || 'Ultralytics YOLOv8n (PyTorch)'}</span>
           </p>
         </div>
 
@@ -606,13 +606,19 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                           <span>PRIVACY PROTECTED (TRACK ID ONLY • NO FACE/BIOMETRIC ID)</span>
                         </div>
 
-                        {/* Active Persons In Bay Badge */}
+                        {/* Active Persons In Bay Badge (Synchronized Authoritative Backend AI Result) */}
                         <div className="absolute top-3 right-3 bg-slate-900/80 backdrop-blur-xs border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-bold text-white flex items-center gap-2 shadow-lg">
-                          <Users className="w-3.5 h-3.5 text-indigo-400" />
+                          <Users className="w-3.5 h-3.5 text-emerald-400" />
                           <span>
-                            Visible: <span className="text-emerald-400 font-mono">{activeDetections.filter((d: any) => d.class === 'person').length}</span>
-                            <span className="text-slate-400 mx-1.5 font-normal">•</span>
-                            AI Estimate: <span className="text-indigo-300 font-mono">{pAnalysis.aiEstimatedPresence} Trainees</span>
+                            Detected: <span className="text-emerald-300 font-mono">{pAnalysis.aiEstimatedPresence} Persons</span>
+                            {frameEvents.length > 0 && (
+                              <>
+                                <span className="text-slate-500 mx-1.5 font-normal">•</span>
+                                <span className="text-slate-300 font-normal">
+                                  Live Frame: <span className="text-indigo-300 font-mono">{activeDetections.filter((d: any) => d.class === 'person').length} Visible</span>
+                                </span>
+                              </>
+                            )}
                           </span>
                         </div>
                       </>
@@ -753,7 +759,7 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                       </span>
                     </div>
                     <span className="text-[11px] text-emerald-400 font-mono font-semibold">
-                      Model: YOLOv8m Inference
+                      Model: {analysisData?.video?.modelVersion || 'Ultralytics YOLOv8n (PyTorch)'}
                     </span>
                   </div>
                 </div>
@@ -914,11 +920,11 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
               </div>
 
               <div className="p-3.5 bg-indigo-50/70 rounded-xl border border-indigo-100">
-                <span className="text-[11px] text-indigo-700 block font-semibold">AI Estimated</span>
+                <span className="text-[11px] text-indigo-700 block font-semibold">AI Estimated Visible Persons</span>
                 <span className="text-xl font-bold text-indigo-950 mt-1 block">
                   {pAnalysis.aiEstimatedPresence} Trainees
                 </span>
-                <span className="text-[10px] text-indigo-600">YOLOv8m Vision</span>
+                <span className="text-[10px] text-indigo-600 font-mono">{analysisData?.video?.modelVersion || 'Ultralytics YOLOv8n (PyTorch)'}</span>
               </div>
             </div>
 
