@@ -238,20 +238,6 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
         </button>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {isAICompleted && (
-            <button
-              onClick={() => onNavigate('ai_analysis', detail.submissionId)}
-              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5"
-            >
-              {hasVideo ? <FileVideo className="w-4 h-4" /> : <ImageIcon className="w-4 h-4" />}
-              <span>
-                {hasVideo
-                  ? 'Open Video AI Analysis →'
-                  : 'Open Image AI Analysis →'}
-              </span>
-            </button>
-          )}
-
           {hasMedia && (
             <button
               onClick={handleRunAIAnalysis}
@@ -268,9 +254,7 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
                   ? 'Processing AI Pipeline...'
                   : isAICompleted
                   ? 'Re-run AI Analysis'
-                  : hasVideo
-                  ? 'Run Video AI Analysis'
-                  : 'Run Image AI Analysis'}
+                  : 'AI Analysis'}
               </span>
             </button>
           )}
