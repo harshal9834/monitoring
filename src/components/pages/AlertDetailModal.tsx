@@ -300,49 +300,49 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
 
             {/* Right: Technical Observation Details */}
             <div className="space-y-4">
-              <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+              <span className="text-sm font-bold text-slate-700 uppercase tracking-wider block">
                 Verification & Audit Baseline Comparison
               </span>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 text-xs">
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                  <span className="text-slate-500">Audited Centre:</span>
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3.5 text-sm">
+                <div className="flex justify-between items-center pb-2.5 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Audited Centre:</span>
                   <span className="font-bold text-slate-900">{alert.centreName}</span>
                 </div>
 
                 {alert.submissionId && (
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                    <span className="text-slate-500">Linked Submission ID:</span>
+                  <div className="flex justify-between items-center pb-2.5 border-b border-slate-200">
+                    <span className="text-slate-500 font-medium">Linked Submission ID:</span>
                     <span className="font-mono font-bold text-indigo-700">{alert.submissionId}</span>
                   </div>
                 )}
 
                 {alert.assetType && (
-                  <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                    <span className="text-slate-500">Asset Category:</span>
-                    <span className="font-bold text-slate-800 uppercase bg-slate-200 px-2 py-0.5 rounded text-[11px]">
+                  <div className="flex justify-between items-center pb-2.5 border-b border-slate-200">
+                    <span className="text-slate-500 font-medium">Asset Category:</span>
+                    <span className="font-bold text-slate-800 uppercase bg-slate-200 px-2.5 py-0.5 rounded text-xs">
                       {alert.assetType}
                     </span>
                   </div>
                 )}
 
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                  <span className="text-slate-500">Government-Approved Baseline:</span>
-                  <span className="font-bold text-emerald-700 text-sm">
+                <div className="flex justify-between items-center pb-2.5 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Government-Approved Baseline:</span>
+                  <span className="font-extrabold text-emerald-700 text-base">
                     {alert.approvedCount !== undefined ? alert.approvedCount : alert.submittedValue} Units
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                  <span className="text-slate-500">AI-Detected Current Count:</span>
-                  <span className="font-bold text-rose-600 text-sm">
+                <div className="flex justify-between items-center pb-2.5 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">AI-Detected Current Count:</span>
+                  <span className="font-extrabold text-rose-600 text-base">
                     {alert.detectedCount !== undefined ? alert.detectedCount : alert.aiValue} Units
                   </span>
                 </div>
 
-                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
-                  <span className="text-slate-500">Observed Reduction:</span>
-                  <span className="font-bold text-rose-700">
+                <div className="flex justify-between items-center pb-2.5 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Observed Reduction:</span>
+                  <span className="font-extrabold text-rose-700 text-base">
                     {alert.difference !== undefined
                       ? `${alert.difference} Units`
                       : `-${alert.variance} Units`}
@@ -350,20 +350,20 @@ export const AlertDetailModal: React.FC<AlertDetailModalProps> = ({
                 </div>
 
                 <div className="flex justify-between items-center">
-                  <span className="text-slate-500">Event Detection Timestamp:</span>
-                  <span className="font-mono text-[11px] text-slate-700 font-semibold">
+                  <span className="text-slate-500 font-medium">Event Detection Timestamp:</span>
+                  <span className="font-mono text-xs text-slate-700 font-bold">
                     {alert.eventTimestamp || alert.detectedTime}
                   </span>
                 </div>
               </div>
 
               {/* Description Notice */}
-              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-900 space-y-1.5">
                 <span className="font-bold flex items-center gap-1.5 text-amber-900">
-                  <ShieldAlert className="w-4 h-4 text-amber-600" />
+                  <ShieldAlert className="w-4.5 h-4.5 text-amber-600" />
                   <span>Observation Note:</span>
                 </span>
-                <p className="text-[11px] leading-relaxed text-amber-800">
+                <p className="text-xs leading-relaxed text-amber-800">
                   {alert.description || "Persistent infrastructure count reduction detected. Review the evidence clip to determine whether the asset was relocated, temporarily obscured, or otherwise unavailable."}
                 </p>
               </div>

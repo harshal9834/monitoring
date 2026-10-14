@@ -453,9 +453,16 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-24 text-slate-500">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mb-3" />
-        <p className="text-sm font-medium">Loading AI video analytics & detection tracks from MySQL...</p>
+      <div className="flex flex-col items-center justify-center py-28 text-slate-700 animate-in fade-in duration-200">
+        <div className="relative w-16 h-16 mb-4 flex items-center justify-center">
+          <div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div>
+          <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
+          <Sparkles className="w-6 h-6 text-indigo-600 animate-pulse" />
+        </div>
+        <h3 className="text-lg font-bold text-slate-900 tracking-tight">Processing AI Analysis...</h3>
+        <p className="text-xs text-slate-500 font-medium mt-1">
+          Running YOLOv8 vision pipeline across classroom video frames and accredited baseline infrastructure.
+        </p>
       </div>
     );
   }
@@ -911,37 +918,37 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="text-[11px] text-slate-500 block">Reported Attendance</span>
-                <span className="text-xl font-bold text-slate-900 mt-1 block">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider block">Reported Attendance</span>
+                <span className="text-2xl font-black text-slate-900 mt-1 block">
                   {pAnalysis.reportedAttendance} Trainees
                 </span>
-                <span className="text-[10px] text-slate-400">Centre Claimed</span>
+                <span className="text-xs text-slate-500 font-medium">Centre Claimed</span>
               </div>
 
-              <div className="p-3.5 bg-indigo-50/70 rounded-xl border border-indigo-100">
-                <span className="text-[11px] text-indigo-700 block font-semibold">AI Estimated Visible Persons</span>
-                <span className="text-xl font-bold text-indigo-950 mt-1 block">
+              <div className="p-4 bg-indigo-50/70 rounded-xl border border-indigo-100">
+                <span className="text-xs text-indigo-700 block font-bold uppercase tracking-wider">AI Estimated Visible Persons</span>
+                <span className="text-2xl font-black text-indigo-950 mt-1 block">
                   {pAnalysis.aiEstimatedPresence} Trainees
                 </span>
-                <span className="text-[10px] text-indigo-600 font-mono">{analysisData?.video?.modelVersion || 'Ultralytics YOLOv8n (PyTorch)'}</span>
+                <span className="text-xs text-indigo-600 font-mono font-medium">{analysisData?.video?.modelVersion || 'Ultralytics YOLOv8n (PyTorch)'}</span>
               </div>
             </div>
 
-            <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-rose-800 font-semibold">Attendance Discrepancy / Potential Variance:</span>
-                <span className="font-bold text-rose-900 text-sm">
+            <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-rose-900 font-bold">Attendance Discrepancy / Variance:</span>
+                <span className="font-extrabold text-rose-900 text-base">
                   -{pAnalysis.discrepancyCount} Trainees ({pAnalysis.discrepancyPercentage}%)
                 </span>
               </div>
-              <div className="w-full bg-rose-200 h-2 rounded-full overflow-hidden">
+              <div className="w-full bg-rose-200 h-2.5 rounded-full overflow-hidden">
                 <div
                   className="bg-rose-600 h-full rounded-full"
                   style={{ width: `${Math.min(100, pAnalysis.discrepancyPercentage)}%` }}
                 />
               </div>
-              <p className="text-[11px] text-rose-700">
+              <p className="text-xs text-rose-800 font-medium leading-relaxed">
                 Statutory threshold: Variances exceeding 10% warrant mandatory formal notice and financial withholding.
               </p>
             </div>
@@ -973,37 +980,37 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                       key={item.assetKey || item.assetCode || idx}
                       className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
                     >
-                      <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center justify-between text-sm">
                         <span className="font-bold text-slate-800">{item.assetType || item.assetName}</span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                        <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                           isUnder ? 'bg-amber-100 text-amber-800 border border-amber-200' : 'bg-emerald-100 text-emerald-800'
                         }`}>
                           {item.status}
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
-                        <div className="bg-white p-1.5 rounded border border-slate-200">
-                          <span className="text-slate-400 block text-[9px] uppercase">Approved</span>
-                          <span className="font-bold text-slate-800">{approvedQty}</span>
+                      <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                          <span className="text-slate-400 block text-xs font-semibold uppercase">Approved</span>
+                          <span className="font-extrabold text-slate-900 text-base">{approvedQty}</span>
                         </div>
-                        <div className="bg-white p-1.5 rounded border border-slate-200">
-                          <span className="text-slate-400 block text-[9px] uppercase">Reported</span>
-                          <span className="font-bold text-slate-800">{reportedQty}</span>
+                        <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
+                          <span className="text-slate-400 block text-xs font-semibold uppercase">Reported</span>
+                          <span className="font-extrabold text-slate-900 text-base">{reportedQty}</span>
                         </div>
-                        <div className={`p-1.5 rounded border ${
+                        <div className={`p-2 rounded-lg border shadow-2xs ${
                           detectedQty > 0
-                            ? (isUnder ? 'bg-amber-50 border-amber-200 text-amber-900 font-bold' : 'bg-emerald-50 border-emerald-200 text-emerald-900 font-bold')
-                            : 'bg-slate-100 border-slate-200 text-slate-500'
+                            ? (isUnder ? 'bg-amber-50 border-amber-200 text-amber-900 font-extrabold' : 'bg-emerald-50 border-emerald-200 text-emerald-900 font-extrabold')
+                            : 'bg-slate-100 border-slate-200 text-slate-500 font-semibold'
                         }`}>
-                          <span className="text-slate-400 block text-[9px] uppercase">AI Observed</span>
-                          <span className="font-bold">
+                          <span className="text-slate-400 block text-xs font-semibold uppercase">AI Observed</span>
+                          <span className="font-extrabold text-base">
                             {detectedQty > 0 ? detectedQty : 'N/A'}
                           </span>
                         </div>
                       </div>
                       {item.note && (
-                        <p className="text-[10px] text-slate-500 italic mt-1">{item.note}</p>
+                        <p className="text-xs text-slate-500 italic mt-1">{item.note}</p>
                       )}
                     </div>
                   );

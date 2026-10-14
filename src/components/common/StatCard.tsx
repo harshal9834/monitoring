@@ -36,22 +36,22 @@ export const StatCard: React.FC<StatCardProps> = ({
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{title}</span>
-        <div className="w-8 h-8 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600">
-          <Icon className="w-4 h-4" />
+        <span className="text-sm font-semibold text-slate-500 uppercase tracking-wider">{title}</span>
+        <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center text-slate-600">
+          <Icon className="w-4.5 h-4.5" />
         </div>
       </div>
 
       <div className="mt-3 flex items-baseline justify-between">
-        <span className="text-2xl font-bold text-slate-900 tracking-tight">{value}</span>
+        <span className="text-3xl font-extrabold text-slate-900 tracking-tight">{value}</span>
         {badge && (
-          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${badgeClasses}`}>
+          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${badgeClasses}`}>
             {badge.text}
           </span>
         )}
       </div>
 
-      {subtitle && <p className="mt-1.5 text-xs text-slate-500">{subtitle}</p>}
+      {subtitle && <p className="mt-1.5 text-sm text-slate-500 leading-relaxed">{subtitle}</p>}
     </div>
   );
 };

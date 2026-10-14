@@ -148,7 +148,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
 
     fetchStats();
-    const interval = setInterval(fetchStats, 10000);
+    // 60-second background refresh; instant updates triggered via 'skillguard:refresh-stats'
+    const interval = setInterval(fetchStats, 60000);
     const handleUpdate = () => fetchStats();
     window.addEventListener('skillguard:refresh-stats', handleUpdate);
 
@@ -297,19 +298,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => handleItemClick(item.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+                  className={`w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-sm font-semibold transition-all ${
                     isActive
-                      ? 'bg-indigo-600 text-white shadow-xs font-semibold'
+                      ? 'bg-indigo-600 text-white shadow-xs'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50'
                   }`}
                 >
                 <div className="flex items-center space-x-3">
-                  <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                  <span>{item.label}</span>
+                  <Icon className={`w-4.5 h-4.5 shrink-0 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="tracking-tight">{item.label}</span>
                 </div>
                 {item.badge !== undefined && (
                   <span
-                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                    className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${
                       isActive ? 'bg-indigo-700 text-white' : item.badgeColor
                     }`}
                   >

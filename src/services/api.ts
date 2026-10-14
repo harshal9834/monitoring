@@ -5,7 +5,7 @@ const DEFAULT_PROD_API = 'https://monitoring-8yp9.onrender.com/api';
 
 export const API_BASE = (import.meta.env.VITE_API_URL
   ? `${(import.meta.env.VITE_API_URL as string).replace(/\/$/, '')}/api`
-  : (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')
+  : (typeof window !== 'undefined' && (window.location.hostname.includes('vercel.app') || window.location.hostname.includes('onrender.com'))
       ? DEFAULT_PROD_API
       : (import.meta.env.PROD ? DEFAULT_PROD_API : '/api')));
 
@@ -54,36 +54,51 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // AbortController with 25-second timeout for server protection
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
+
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers,
+      signal: controller.signal,
     });
   } catch (netErr: any) {
+    clearTimeout(timeoutId);
     console.error(`[API Network Error] ${options.method || 'GET'} ${API_BASE}${endpoint}:`, netErr);
-    throw new Error('Unable to reach AI analysis server. Please check network connection or server status.');
+    if (netErr.name === 'AbortError') {
+      throw new Error('The server is taking too long to respond. Please try again.');
+    }
+    throw new Error('Unable to connect to the server. Please try again.');
+  } finally {
+    clearTimeout(timeoutId);
   }
 
   if (!response.ok) {
     if (response.status === 401) {
-      removeAuthToken();
-      localStorage.removeItem('skillguard_current_user');
-      window.dispatchEvent(new CustomEvent('skillguard:unauthorized'));
-      throw new Error('Authentication expired. Please log in again.');
+      if (!endpoint.includes('/auth/login')) {
+        removeAuthToken();
+        localStorage.removeItem('skillguard_current_user');
+        window.dispatchEvent(new CustomEvent('skillguard:unauthorized'));
+      }
+      const errorData = await response.json().catch(() => ({ detail: 'Invalid email/username or password.' }));
+      throw new Error(errorData.detail || 'Invalid email/username or password.');
     }
     if (response.status === 403) {
-      throw new Error('You are not authorized to perform this operation or analyze this submission.');
+      const errorData = await response.json().catch(() => ({ detail: 'You are not authorized to perform this operation.' }));
+      throw new Error(errorData.detail || 'Access forbidden: You do not have permissions for this portal.');
     }
     if (response.status === 404) {
-      throw new Error('AI analysis endpoint or submission media not found.');
+      throw new Error('Requested resource or endpoint not found.');
     }
     if (response.status === 503) {
-      throw new Error('AI analysis service temporarily unavailable. Database or server is warming up, please retry shortly.');
+      throw new Error('Service temporarily unavailable. The database or server is warming up, please retry shortly.');
     }
     if (response.status >= 500) {
-      const errorData = await response.json().catch(() => ({ detail: 'AI analysis server error.' }));
-      throw new Error(errorData.detail || 'AI analysis server error.');
+      const errorData = await response.json().catch(() => ({ detail: 'Server encountered an error. Please try again.' }));
+      throw new Error(errorData.detail || 'Server encountered an error. Please try again.');
     }
     const errorData = await response.json().catch(() => ({ detail: 'API Error' }));
     throw new Error(errorData.detail || `Request failed with status ${response.status}`);
@@ -222,25 +237,65 @@ export const api = {
     const fallback = await request<any[]>('/centre/submissions');
     return Array.isArray(fallback) ? fallback : [];
   },
-  createSubmission: async (formData: FormData) => {
+  createSubmission: async (formData: FormData, onProgress?: (percentage: number) => void) => {
     const token = getAuthToken();
-    const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(`${API_BASE}/submissions`, {
-      method: 'POST',
-      headers,
-      body: formData,
+    return new Promise<any>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/submissions`);
+
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+
+      if (xhr.upload && onProgress) {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable && e.total > 0) {
+            const pct = Math.min(100, Math.round((e.loaded / e.total) * 100));
+            onProgress(pct);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        if (onProgress) onProgress(100);
+        let respData: any = {};
+        try {
+          respData = xhr.responseText ? JSON.parse(xhr.responseText) : {};
+        } catch {
+          respData = { detail: xhr.responseText || 'Submission response parse error' };
+        }
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(respData);
+        } else {
+          if (xhr.status === 401) {
+            removeAuthToken();
+            localStorage.removeItem('skillguard_current_user');
+            window.dispatchEvent(new CustomEvent('skillguard:unauthorized'));
+            reject(new Error('Authentication expired. Please log in again.'));
+          } else if (xhr.status === 403) {
+            reject(new Error('Access denied. You are not authorized to submit for this centre.'));
+          } else {
+            reject(new Error(respData.detail || `Submission failed with status ${xhr.status}`));
+          }
+        }
+      };
+
+      xhr.onerror = () => {
+        reject(new Error('Network error during file upload. Please check connection and try again.'));
+      };
+
+      xhr.send(formData);
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to create submission' }));
-      throw new Error(err.detail || 'Failed to create submission');
-    }
-    return res.json();
   },
   removeCentreSubmission: (submissionId: string, reason?: string) =>
     request<any>(`/centre/submissions/${submissionId}/remove`, {
       method: 'POST',
       body: JSON.stringify({ reason: reason || 'Removed by Training Centre' }),
+    }),
+  startDemoCCTV: () =>
+    request<any>('/centre/cctv/demo/start', {
+      method: 'POST',
     }),
   submitAttendance: (data: any) =>
     request<any>('/centre/attendance/submissions', {

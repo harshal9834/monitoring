@@ -12,6 +12,7 @@ import {
   FileText,
   Clock,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { appState } from '../../services/storage';
 import { api } from '../../services/api';
@@ -57,9 +58,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotSentMsg, setForgotSentMsg] = useState<string | null>(null);
 
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoggingIn) return;
     setLoginError(null);
+    setIsLoggingIn(true);
     try {
       const portalType =
         loginRoleOption === 'SUPER_ADMIN'
@@ -81,7 +86,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
       onSuccess();
     } catch (err: any) {
-      setLoginError(err.message || 'Invalid credentials or role');
+      console.error('[AuthModal] Login failed:', err);
+      const msg = err?.message || '';
+      if (msg.includes('taking too long') || msg.includes('AbortError')) {
+        setLoginError('The server is taking too long to respond. Please try again.');
+      } else if (msg.includes('Failed to fetch') || msg.includes('Network') || msg.includes('Unable to connect')) {
+        setLoginError('Unable to connect to the server. Please try again.');
+      } else {
+        setLoginError(msg || 'Invalid credentials or role. Please try again.');
+      }
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -380,10 +395,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                 <button
                   type="submit"
-                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-2"
+                  disabled={isLoggingIn}
+                  className={`w-full py-2.5 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center space-x-2 ${
+                    isLoggingIn
+                      ? 'bg-indigo-400 cursor-not-allowed opacity-90'
+                      : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800'
+                  }`}
                 >
-                  <span>Sign In</span>
-                  <ArrowRight className="w-4 h-4" />
+                  {isLoggingIn ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Signing in...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Sign In</span>
+                      <ArrowRight className="w-4 h-4" />
+                    </>
+                  )}
                 </button>
               </form>
             )}
@@ -662,6 +691,37 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* FULL-SCREEN LOADING OVERLAY */}
+      {isLoggingIn && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+        >
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full mx-auto shadow-2xl border border-slate-200 text-center space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
+              <Shield className="w-6 h-6 text-indigo-700 animate-pulse" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                Signing you in...
+              </h3>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                Please wait while we securely authenticate your account.
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+              <span>TLS 1.3 &bull; Encrypted Session</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

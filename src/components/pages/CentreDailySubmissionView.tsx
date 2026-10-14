@@ -10,6 +10,11 @@ import {
   FileVideo,
   FileImage,
   Image,
+  Camera,
+  Video,
+  Play,
+  Sparkles,
+  ShieldCheck,
   X,
   ArrowRight,
   ShieldAlert,
@@ -64,6 +69,13 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [submissionSuccess, setSubmissionSuccess] = useState<any | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // OPTION C: Demo CCTV States
+  const [showCctvModal, setShowCctvModal] = useState(false);
+  const [isStartingCctv, setIsStartingCctv] = useState(false);
+  const [cctvData, setCctvData] = useState<any | null>(null);
+  const [cctvError, setCctvError] = useState<string | null>(null);
+  const [cctvActiveSeconds, setCctvActiveSeconds] = useState<number>(0);
 
   // Load centre batches and approved assets dynamically from MySQL
   useEffect(() => {
@@ -160,6 +172,41 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
     setSelectedImageFile(null);
   };
 
+  // Start Demo CCTV Monitoring
+  const handleStartDemoCCTV = async () => {
+    setIsStartingCctv(true);
+    setCctvError(null);
+    setShowCctvModal(true);
+    setCctvActiveSeconds(0);
+
+    try {
+      const res = await api.startDemoCCTV();
+      setCctvData(res);
+      // Dispatch refresh event so Government Alerts and Header/Sidebar badges update dynamically
+      window.dispatchEvent(new CustomEvent('skillguard:refresh-stats'));
+    } catch (err: any) {
+      console.error('Failed to start Demo CCTV:', err);
+      setCctvError(err.message || 'Failed to connect to simulated CCTV feed.');
+    } finally {
+      setIsStartingCctv(false);
+    }
+  };
+
+  // Live timer for CCTV monitoring
+  useEffect(() => {
+    let timer: any = null;
+    if (showCctvModal) {
+      timer = setInterval(() => {
+        setCctvActiveSeconds((prev) => prev + 1);
+      }, 1000);
+    } else {
+      setCctvActiveSeconds(0);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [showCctvModal]);
+
   // Validate before showing confirmation modal
   const handleInitiateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -198,16 +245,20 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
       formData.append('infrastructure_reported', JSON.stringify(infraReported));
 
       if (selectedVideoFile) {
-        setVideoUploadProgress(50);
+        setVideoUploadProgress(0);
         formData.append('video', selectedVideoFile);
       }
 
       if (selectedImageFile) {
-        setImageUploadProgress(50);
+        setImageUploadProgress(0);
         formData.append('image', selectedImageFile);
       }
 
-      const res = await api.createSubmission(formData);
+      const res = await api.createSubmission(formData, (percentage) => {
+        if (selectedVideoFile) setVideoUploadProgress(percentage);
+        if (selectedImageFile) setImageUploadProgress(percentage);
+      });
+
       if (selectedVideoFile) setVideoUploadProgress(100);
       if (selectedImageFile) setImageUploadProgress(100);
 
@@ -479,44 +530,44 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-700">Total Registered Trainees</label>
+              <label className="block text-sm font-bold text-slate-700">Total Registered Trainees</label>
               <input
                 type="number"
                 min="1"
                 max="200"
                 value={totalRegistered}
                 onChange={(e) => setTotalRegistered(parseInt(e.target.value) || 0)}
-                className="w-full text-base font-bold text-slate-900 bg-white border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
+                className="w-full text-lg font-extrabold text-slate-900 bg-white border border-slate-300 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden"
                 required
               />
-              <p className="text-[11px] text-slate-400">Official batch roster strength</p>
+              <p className="text-xs text-slate-500 font-medium">Official batch roster strength</p>
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-700">Trainees Present Today</label>
+              <label className="block text-sm font-bold text-slate-700">Trainees Present Today</label>
               <input
                 type="number"
                 min="0"
                 max={totalRegistered}
                 value={totalPresent}
                 onChange={(e) => setTotalPresent(parseInt(e.target.value) || 0)}
-                className={`w-full text-base font-bold bg-white border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden ${
+                className={`w-full text-lg font-extrabold bg-white border rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-hidden ${
                   isPresentInvalid ? 'border-rose-300 text-rose-600' : 'border-slate-300 text-slate-900'
                 }`}
                 required
               />
-              <p className="text-[11px] text-slate-400">Physical trainees verified in class</p>
+              <p className="text-xs text-slate-500 font-medium">Physical trainees verified in class</p>
             </div>
 
             <div className="space-y-1.5">
-              <label className="block text-xs font-semibold text-slate-700">Trainees Absent (Auto-Calculated)</label>
-              <div className="w-full text-base font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 flex items-center justify-between">
+              <label className="block text-sm font-bold text-slate-700">Trainees Absent (Auto-Calculated)</label>
+              <div className="w-full text-lg font-extrabold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 flex items-center justify-between">
                 <span>{totalAbsent}</span>
-                <span className="text-[10px] font-mono font-normal text-slate-400">
+                <span className="text-xs font-mono font-semibold text-slate-500">
                   {totalRegistered > 0 ? `${Math.round(((totalRegistered - totalPresent) / totalRegistered) * 100)}% absent` : ''}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Automatically calculated: Registered - Present</p>
+              <p className="text-xs text-slate-500 font-medium">Automatically calculated: Registered - Present</p>
             </div>
           </div>
 
@@ -655,26 +706,28 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
             </div>
           </div>
 
-          {/* TWO SEPARATE UPLOAD OPTIONS (TWO-CARD LAYOUT) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* THREE SEPARATE OPTIONS: Option A Video | Option B Image | Option C CCTV Camera */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             {/* OPTION A: UPLOAD VIDEO */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
-                    <FileVideo className="w-4 h-4" />
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                      <FileVideo className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">Attendance / Centre Video</h4>
+                      <p className="text-[10px] text-slate-500">MP4, AVI, MOV, WebM</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">Attendance / Centre Video</h4>
-                    <p className="text-[10px] text-slate-500">MP4, AVI, MOV, WebM</p>
-                  </div>
+                  <span className="text-[10px] font-mono text-slate-400">OPTION A</span>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400">OPTION A</span>
-              </div>
 
-              <p className="text-[11px] text-slate-600">
-                Upload a recorded classroom or centre video for AI attendance and infrastructure analysis.
-              </p>
+                <p className="text-[11px] text-slate-600">
+                  Upload a recorded classroom or centre video for AI attendance and infrastructure analysis.
+                </p>
+              </div>
 
               {!selectedVideoFile ? (
                 <label className="border-2 border-dashed border-slate-300 hover:border-indigo-400 bg-white hover:bg-indigo-50/20 rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer transition-colors group">
@@ -738,23 +791,25 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
             </div>
 
             {/* OPTION B: UPLOAD IMAGE */}
-            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                    <FileImage className="w-4 h-4" />
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 flex flex-col justify-between">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                      <FileImage className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">Attendance / Centre Image</h4>
+                      <p className="text-[10px] text-slate-500">JPG, JPEG, PNG, WEBP</p>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900">Attendance / Centre Image</h4>
-                    <p className="text-[10px] text-slate-500">JPG, JPEG, PNG, WEBP</p>
-                  </div>
+                  <span className="text-[10px] font-mono text-slate-400">OPTION B</span>
                 </div>
-                <span className="text-[10px] font-mono text-slate-400">OPTION B</span>
-              </div>
 
-              <p className="text-[11px] text-slate-600">
-                Upload a classroom or centre image for AI-based person counting and infrastructure detection.
-              </p>
+                <p className="text-[11px] text-slate-600">
+                  Upload a classroom or centre image for AI-based person counting and infrastructure detection.
+                </p>
+              </div>
 
               {!selectedImageFile ? (
                 <label className="border-2 border-dashed border-slate-300 hover:border-emerald-400 bg-white hover:bg-emerald-50/20 rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer transition-colors group">
@@ -815,6 +870,69 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
                   )}
                 </div>
               )}
+            </div>
+
+            {/* OPTION C: CCTV CAMERA */}
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 flex flex-col justify-between hover:border-indigo-300 transition-all shadow-2xs">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-purple-100 text-purple-700 flex items-center justify-center">
+                      <Camera className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900">CCTV Camera</h4>
+                      <p className="text-[10px] text-purple-700 font-semibold">Simulated Live Feed</p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono text-purple-600 font-bold bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200">
+                    OPTION C
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-600">
+                  Run a simulated CCTV feed for continuous AI-based attendance and infrastructure monitoring.
+                </p>
+
+                <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">Camera Feed:</span>
+                    <span className="font-semibold text-slate-800">Classroom CCTV 01</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-500">Stream Status:</span>
+                    <span className="inline-flex items-center gap-1 font-bold text-emerald-700 text-[10px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                      Demo / Simulated Feed
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  type="button"
+                  onClick={handleStartDemoCCTV}
+                  disabled={isStartingCctv}
+                  className="w-full py-3 px-4 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white font-bold text-xs rounded-xl shadow-xs hover:shadow-sm transition-all flex items-center justify-center gap-2"
+                >
+                  {isStartingCctv ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Connecting Feed...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Start Demo CCTV</span>
+                    </>
+                  )}
+                </button>
+
+                <p className="text-[10px] text-center text-slate-400 font-medium">
+                  Demo CCTV • No physical camera required
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -940,6 +1058,239 @@ export const CentreDailySubmissionView: React.FC<CentreDailySubmissionViewProps>
                 ) : (
                   <span>Confirm & Transmit</span>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OPTION C: CCTV MONITORING MODAL */}
+      {showCctvModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150 my-auto">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-slate-900">
+                      {cctvData?.cameraName || 'Classroom CCTV 01 • Live Feed'}
+                    </h3>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-600 text-white animate-pulse tracking-wide shadow-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                      LIVE • DEMO CCTV
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Continuous AI vision pipeline monitoring attendance & infrastructure
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowCctvModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-xl transition-colors"
+                title="Close CCTV Feed"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Error Message */}
+            {cctvError && (
+              <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center gap-2.5 text-xs text-rose-700 font-semibold">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{cctvError}</span>
+              </div>
+            )}
+
+            {/* Live Video Feed Screen */}
+            <div className="relative rounded-2xl overflow-hidden bg-slate-950 aspect-video border border-slate-800 shadow-inner flex items-center justify-center">
+              {cctvData?.videoUrl ? (
+                <video
+                  src={cctvData.videoUrl}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center text-slate-400 space-y-2">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+                  <span className="text-xs font-mono">Connecting to simulated camera stream...</span>
+                </div>
+              )}
+
+              {/* Feed Overlays */}
+              <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
+                <span className="px-2 py-0.5 rounded bg-black/60 backdrop-blur-xs text-[10px] font-mono text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                  REC 1080p • 30 FPS
+                </span>
+                <span className="px-2 py-0.5 rounded bg-black/60 backdrop-blur-xs text-[10px] font-mono text-white/90">
+                  {new Date().toISOString().split('T')[0]} {String(Math.floor(cctvActiveSeconds / 60)).padStart(2, '0')}:{String(cctvActiveSeconds % 60).padStart(2, '0')}
+                </span>
+              </div>
+
+              <div className="absolute top-3 right-3 pointer-events-none">
+                <span className="px-2.5 py-1 rounded-lg bg-indigo-950/80 backdrop-blur-xs text-[10px] font-bold text-indigo-200 border border-indigo-400/30 flex items-center gap-1.5 shadow-xs">
+                  <Sparkles className="w-3 h-3 text-indigo-400 animate-spin" />
+                  AI Monitoring Pipeline Active
+                </span>
+              </div>
+
+              <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+                <span className="px-2.5 py-1 rounded bg-black/60 backdrop-blur-xs text-[10px] font-mono text-slate-300">
+                  Centre: {centreData?.centreName || 'Skill Training Centre'}
+                </span>
+                <span className="px-2.5 py-1 rounded bg-black/60 backdrop-blur-xs text-[10px] font-mono text-purple-300">
+                  Stream ID: CAM-01-SIM
+                </span>
+              </div>
+            </div>
+
+            {/* Live Detected Metrics */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">
+                  Persons Detected
+                </span>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-xl font-black text-slate-900">
+                    {cctvData?.personCount ?? 18}
+                  </span>
+                  <span className="text-[11px] font-medium text-slate-500">Trainees</span>
+                </div>
+                <span className="text-[10px] text-emerald-600 font-semibold block">
+                  AI Confidence: 95.8%
+                </span>
+              </div>
+
+              <div className="p-3 bg-rose-50/80 border border-rose-200 rounded-xl space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-rose-700 uppercase tracking-wider">
+                    Benches
+                  </span>
+                  <span className="text-[9px] font-bold bg-rose-600 text-white px-1.5 py-0.2 rounded">
+                    -3 Units
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-rose-600">
+                    {cctvData?.infrastructure?.benches?.current ?? 17}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">/ 20 Approved</span>
+                </div>
+                <span className="text-[10px] text-rose-600 font-bold block truncate">
+                  Count Reduction Detected
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Computers
+                  </span>
+                  <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded">
+                    OK
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-slate-900">
+                    {cctvData?.infrastructure?.computers?.current ?? 20}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">/ 20 Approved</span>
+                </div>
+                <span className="text-[10px] text-emerald-600 font-semibold block">
+                  Sufficient Baseline
+                </span>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                    Chairs
+                  </span>
+                  <span className="text-[9px] font-bold bg-emerald-100 text-emerald-700 px-1.5 py-0.2 rounded">
+                    OK
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black text-slate-900">
+                    {cctvData?.infrastructure?.chairs?.current ?? 40}
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">/ 40 Approved</span>
+                </div>
+                <span className="text-[10px] text-emerald-600 font-semibold block">
+                  Sufficient Baseline
+                </span>
+              </div>
+            </div>
+
+            {/* Generated Alert & Cloudinary Evidence Notice */}
+            {cctvData?.alert && (
+              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-3">
+                <div className="flex items-start gap-3">
+                  <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold text-amber-900">
+                        {cctvData.alert.title}
+                      </h4>
+                      <span className="text-[10px] font-bold font-mono bg-amber-200/70 text-amber-900 px-2 py-0.5 rounded">
+                        DISCREPANCY SAVED
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-amber-800 leading-relaxed">
+                      Approved benches: <strong>{cctvData.alert.approvedCount}</strong> &bull; Initial detected count: <strong>{cctvData.alert.previousCount}</strong> &bull; Current detected: <strong>{cctvData.alert.currentCount}</strong> (Difference: <strong>{cctvData.alert.reduction}</strong>). Discrepancy confirmed across temporal monitoring frames.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-amber-200/80 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-amber-900">
+                      Evidence Clip ({cctvData.alert.evidenceWindow}):
+                    </span>
+                    <a
+                      href={cctvData.alert.evidenceClipUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] font-bold text-indigo-700 hover:text-indigo-900 underline"
+                    >
+                      <span>View Cloudinary Clip</span>
+                      <ArrowRight className="w-3 h-3" />
+                    </a>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowCctvModal(false);
+                      onNavigate('issues');
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs transition-colors flex items-center gap-1.5 shadow-2xs"
+                  >
+                    <span>View in Issues & Alerts</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowCctvModal(false)}
+                className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 font-semibold text-xs hover:bg-slate-50 transition-colors"
+              >
+                Close CCTV Monitor
               </button>
             </div>
           </div>

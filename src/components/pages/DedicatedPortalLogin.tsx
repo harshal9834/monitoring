@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Shield, Lock, Mail, ArrowLeft, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
+import { Shield, Lock, Mail, ArrowLeft, ArrowRight, AlertCircle, Sparkles, Loader2 } from 'lucide-react';
 import { appState } from '../../services/storage';
-import { API_BASE } from '../../services/api';
+import { api } from '../../services/api';
 
 interface PortalLoginProps {
   portalType: 'government' | 'centre' | 'admin';
@@ -52,47 +52,39 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return; // Prevent duplicate concurrent login requests
     setErrorMsg(null);
     setIsLoading(true);
 
     try {
-      const payload: any = {
+      const payload = {
         email: email.trim(),
-        username: email.trim(),
         password,
         portal_type: portalType
       };
 
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const res = await api.login(payload);
 
-      let data;
-      try {
-        const text = await res.text();
-        data = text ? JSON.parse(text) : {};
-      } catch (parseError) {
-        throw new Error(`Server connection failed or returned invalid response (${res.status})`);
-      }
+      // Store JWT token for subsequent API calls
+      localStorage.setItem('skillguard_token', res.access_token);
+      localStorage.setItem('skillguard_refresh_token', res.refresh_token);
 
-      if (!res.ok) {
-        throw new Error(data.detail || `Login failed (${res.status})`);
-      }
-
-      // Store JWT token for API calls
-      localStorage.setItem('skillguard_token', data.access_token);
-      localStorage.setItem('skillguard_refresh_token', data.refresh_token);
-
-      // Sync user to appState
-      if (data.user) {
-        appState.setCurrentUser(data.user);
+      // Sync authenticated user to appState
+      if (res.user) {
+        appState.setCurrentUser(res.user);
       }
 
       onSuccess();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Invalid credentials or connection error');
+      console.error('[DedicatedPortalLogin] Login failed:', err);
+      const msg = err?.message || '';
+      if (msg.includes('taking too long') || msg.includes('AbortError')) {
+        setErrorMsg('The server is taking too long to respond. Please try again.');
+      } else if (msg.includes('Failed to fetch') || msg.includes('Network') || msg.includes('Unable to connect')) {
+        setErrorMsg('Unable to connect to the server. Please try again.');
+      } else {
+        setErrorMsg(msg || 'Invalid credentials or connection error. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -266,10 +258,24 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center space-x-2"
+                disabled={isLoading}
+                className={`w-full py-2.5 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center space-x-2 ${
+                  isLoading
+                    ? 'bg-indigo-400 cursor-not-allowed opacity-90'
+                    : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800'
+                }`}
               >
-                <span>{portalType === 'admin' ? 'Secure Sign In' : 'Sign In'}</span>
-                <ArrowRight className="w-4 h-4" />
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Signing in...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>{portalType === 'admin' ? 'Secure Sign In' : 'Sign In'}</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </>
+                )}
               </button>
 
               {/* Bottom Registration Links per portal */}
@@ -348,6 +354,39 @@ export const DedicatedPortalLogin: React.FC<PortalLoginProps> = ({
           )}
         </div>
       </div>
+
+      {/* FULL-SCREEN LOADING OVERLAY (NO BLANK WHITE SCREEN, PRESERVES FORM BEHIND) */}
+      {isLoading && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-200"
+        >
+          <div className="bg-white rounded-3xl p-8 max-w-sm w-full mx-auto shadow-2xl border border-slate-200 text-center space-y-4 animate-in zoom-in-95 duration-200">
+            {/* Centered Animated Circular Spinner with SkillGuard Branding */}
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <div className="absolute inset-0 rounded-full border-4 border-indigo-100"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-indigo-600 border-t-transparent animate-spin"></div>
+              <Shield className="w-6 h-6 text-indigo-700 animate-pulse" />
+            </div>
+
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-bold text-slate-900 tracking-tight">
+                Signing you in...
+              </h3>
+              <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                Please wait while we securely authenticate your account.
+              </p>
+            </div>
+
+            {/* Subtle verification badge */}
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-center gap-1.5 text-[11px] text-slate-400 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+              <span>TLS 1.3 &bull; Encrypted Session</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -165,9 +165,6 @@ async def create_submission(
     video_duration_sec = 0.0
     ai_status = "NOT_STARTED"
 
-    temp_video_path = None
-    temp_image_path = None
-
     if video and video.filename:
         video_orig_name = video.filename
         ext = os.path.splitext(video.filename)[1].lower()
@@ -196,22 +193,6 @@ async def create_submission(
             video_public_id = cloud_res["public_id"]
             video_duration_sec = float(cloud_res.get("duration") or 0.0)
             print(f"[SUBMISSION] Cloudinary upload successful: {video_public_id}", flush=True)
-
-            # Prepare temporary memory-backed file for immediate AI inference
-            fd, temp_video_path = tempfile.mkstemp(suffix=ext)
-            with os.fdopen(fd, "wb") as f_tmp:
-                f_tmp.write(video_bytes)
-
-            if video_duration_sec <= 0.0:
-                try:
-                    cap = cv2.VideoCapture(temp_video_path)
-                    if cap.isOpened():
-                        n_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
-                        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-                        video_duration_sec = round(n_frames / fps, 2) if fps > 0 else 0.0
-                        cap.release()
-                except Exception:
-                    pass
 
             vid_id = f"vid_{sub_id.replace('-', '_').lower()}"
             video_rec = Video(
@@ -243,11 +224,6 @@ async def create_submission(
         except HTTPException:
             raise
         except Exception as e:
-            if temp_video_path and os.path.exists(temp_video_path):
-                try:
-                    os.remove(temp_video_path)
-                except Exception:
-                    pass
             raise HTTPException(status_code=502, detail=f"Media upload failed: {str(e)}")
 
     # Handle Image Upload if provided
@@ -284,26 +260,11 @@ async def create_submission(
             img_public_id = cloud_img_res["public_id"]
             print(f"[SUBMISSION] Cloudinary upload successful: {img_public_id}", flush=True)
 
-            # Prepare temp file for immediate AI image inference
-            fd_img, temp_image_path = tempfile.mkstemp(suffix=img_ext)
-            with os.fdopen(fd_img, "wb") as f_tmp_img:
-                f_tmp_img.write(image_bytes)
-
             if ai_status == "NOT_STARTED":
                 ai_status = "PENDING"
         except HTTPException:
             raise
         except Exception as e:
-            if temp_image_path and os.path.exists(temp_image_path):
-                try:
-                    os.remove(temp_image_path)
-                except Exception:
-                    pass
-            if temp_video_path and os.path.exists(temp_video_path):
-                try:
-                    os.remove(temp_video_path)
-                except Exception:
-                    pass
             raise HTTPException(status_code=502, detail=f"Media upload failed: {str(e)}")
 
     try:
@@ -380,163 +341,6 @@ async def create_submission(
                 created_at=datetime.utcnow()
             ))
 
-        if video_rec or img_secure_url:
-            print("[SUBMISSION] media metadata created", flush=True)
-
-        # If video attached, execute video processing pipeline using temporary file
-        if video_rec and temp_video_path and os.path.exists(temp_video_path):
-            try:
-                from backend.services.video_service import process_video_pipeline
-                analysis_data = process_video_pipeline(
-                    video_path=temp_video_path,
-                    centre_id=resolved_centre_id,
-                    db=db,
-                    submission_id=sub_id,
-                    ai_analysis_id=job.id
-                )
-                est = analysis_data.get("estimated_presence", pres)
-                variance = max(0, pres - est)
-                variance_pct = round((variance / max(pres, 1)) * 100, 1)
-
-                job.status = "COMPLETED"
-                job.progress_percentage = 100
-                job.analysis_results = analysis_data
-                job.completed_at = datetime.utcnow()
-
-                sub.ai_status = "COMPLETED"
-                sub.ai_completed_at = datetime.utcnow()
-                sub.ai_detected_people = est
-                sub.ai_result_json = analysis_data
-
-                ai_res = AttendanceAIResult(
-                    attendance_submission_id=sub_id,
-                    video_id=video_rec.id,
-                    model_version_id="v1.4.0",
-                    estimated_people=est,
-                    confidence=0.942,
-                    variance_count=variance,
-                    variance_percentage=variance_pct,
-                    status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH"),
-                    processed_at=datetime.utcnow()
-                )
-                db.add(ai_res)
-
-                if variance_pct >= 10.0:
-                    sub.status = "DISCREPANCY_CRITICAL"
-                    existing_alert = db.query(Alert).filter(
-                        Alert.centre_id == resolved_centre_id,
-                        Alert.submission_id == sub_id,
-                        Alert.category == "ATTENDANCE_MISMATCH",
-                        Alert.is_deleted == False
-                    ).first()
-                    if not existing_alert:
-                        alert_id = f"alt_att_{int(datetime.utcnow().timestamp())}_{sub_id[-4:]}"
-                        new_alert = Alert(
-                            id=alert_id,
-                            centre_id=resolved_centre_id,
-                            submission_id=sub_id,
-                            video_id=video_rec.id if video_rec else None,
-                            category="ATTENDANCE_MISMATCH",
-                            severity="CRITICAL",
-                            title=f"Attendance Variance ({est} Detected vs {pres} Claimed)",
-                            description=f"YOLO vision pipeline detected {est} trainees in submitted classroom media vs {pres} reported on daily roster (Variance: {variance_pct}%).",
-                            detected_time=datetime.utcnow().strftime("%I:%M %p"),
-                            ai_confidence=0.94,
-                            submitted_value=pres,
-                            ai_value=est,
-                            variance=variance,
-                            status="NEW",
-                            is_deleted=False,
-                            created_at=datetime.utcnow()
-                        )
-                        db.add(new_alert)
-                        db.add(AlertEvidence(
-                            alert_id=alert_id,
-                            snapshot_url=video_secure_url or "/static/videos/classroom_sample.mp4",
-                            video_clip_url=video_secure_url,
-                            detected_count=est,
-                            expected_count=pres,
-                            confidence=0.94,
-                            model_version="v1.4.0",
-                            submission_id=sub_id,
-                            center_id=resolved_centre_id,
-                            timestamp=datetime.utcnow()
-                        ))
-                        print(f"[ATTENDANCE ALERT CREATE] Created alert {alert_id} for submission {sub_id}", flush=True)
-            except Exception as e:
-                print(f"[Warning] Immediate video pipeline execution skipped: {e}")
-                job.status = "PENDING"
-                sub.ai_status = "PENDING"
-                ai_res = AttendanceAIResult(
-                    attendance_submission_id=sub_id,
-                    video_id=video_rec.id,
-                    model_version_id="v1.4.0",
-                    estimated_people=pres,
-                    confidence=0.94,
-                    variance_count=0,
-                    variance_percentage=0.0,
-                    status="MATCH"
-                )
-                db.add(ai_res)
-            finally:
-                # Delete temporary video file immediately
-                if temp_video_path and os.path.exists(temp_video_path):
-                    try:
-                        os.remove(temp_video_path)
-                    except Exception:
-                        pass
-
-        # If image attached and no video, execute image processing pipeline using temporary file
-        elif img_secure_url and temp_image_path and os.path.exists(temp_image_path):
-            try:
-                from backend.services.video_service import process_image_pipeline
-                analysis_data = process_image_pipeline(temp_image_path, resolved_centre_id, db)
-                est = analysis_data.get("estimated_presence", pres)
-                variance = max(0, pres - est)
-                variance_pct = round((variance / max(pres, 1)) * 100, 1)
-
-                sub.ai_status = "COMPLETED"
-                sub.ai_completed_at = datetime.utcnow()
-                sub.ai_detected_people = est
-                sub.image_ai_result_json = analysis_data
-
-                ai_res = AttendanceAIResult(
-                    attendance_submission_id=sub_id,
-                    video_id=None,
-                    model_version_id="v1.4.0",
-                    estimated_people=est,
-                    confidence=0.942,
-                    variance_count=variance,
-                    variance_percentage=variance_pct,
-                    status="CRITICAL" if variance_pct >= 10.0 else ("WARNING" if variance_pct > 0 else "MATCH"),
-                    processed_at=datetime.utcnow()
-                )
-                db.add(ai_res)
-
-                if variance_pct >= 10.0:
-                    sub.status = "DISCREPANCY_CRITICAL"
-            except Exception as e:
-                print(f"[Warning] Immediate image pipeline execution skipped: {e}")
-                sub.ai_status = "PENDING"
-            finally:
-                if temp_image_path and os.path.exists(temp_image_path):
-                    try:
-                        os.remove(temp_image_path)
-                    except Exception:
-                        pass
-        else:
-            # Clean up any residual temp paths
-            if temp_image_path and os.path.exists(temp_image_path):
-                try:
-                    os.remove(temp_image_path)
-                except Exception:
-                    pass
-            if temp_video_path and os.path.exists(temp_video_path):
-                try:
-                    os.remove(temp_video_path)
-                except Exception:
-                    pass
-
         # Audit Log
         audit = AuditLog(
             id=f"aud_{uuid.uuid4().hex[:12]}",
@@ -554,7 +358,7 @@ async def create_submission(
         db.add(audit)
 
         db.commit()
-        print("[SUBMISSION] transaction committed", flush=True)
+        print("[SUBMISSION] transaction committed instantly (AI deferred to background/government review)", flush=True)
 
     except HTTPException:
         db.rollback()
@@ -570,17 +374,6 @@ async def create_submission(
         if img_public_id:
             try:
                 delete_media(img_public_id, resource_type="image")
-            except Exception:
-                pass
-
-        if temp_image_path and os.path.exists(temp_image_path):
-            try:
-                os.remove(temp_image_path)
-            except Exception:
-                pass
-        if temp_video_path and os.path.exists(temp_video_path):
-            try:
-                os.remove(temp_video_path)
             except Exception:
                 pass
 
@@ -608,6 +401,8 @@ async def create_submission(
 
     return {
         "success": True,
+        "submission_id": sub.id,
+        "status": "submitted",
         "submission": {
             "id": sub.id,
             "submissionId": sub.id,
