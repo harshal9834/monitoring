@@ -991,11 +991,20 @@ export const AIAnalysisView: React.FC<AIAnalysisViewProps> = ({ targetId, center
                           <span className="text-slate-400 block text-[9px] uppercase">Reported</span>
                           <span className="font-bold text-slate-800">{reportedQty}</span>
                         </div>
-                        <div className={`p-1.5 rounded border ${isUnder ? 'bg-amber-50 border-amber-200 text-amber-900 font-bold' : 'bg-white border-slate-200'}`}>
-                          <span className="text-slate-400 block text-[9px] uppercase">Detected</span>
-                          <span className="font-bold">{detectedQty}</span>
+                        <div className={`p-1.5 rounded border ${
+                          detectedQty > 0
+                            ? (isUnder ? 'bg-amber-50 border-amber-200 text-amber-900 font-bold' : 'bg-emerald-50 border-emerald-200 text-emerald-900 font-bold')
+                            : 'bg-slate-100 border-slate-200 text-slate-500'
+                        }`}>
+                          <span className="text-slate-400 block text-[9px] uppercase">AI Observed</span>
+                          <span className="font-bold">
+                            {detectedQty > 0 ? detectedQty : 'N/A'}
+                          </span>
                         </div>
                       </div>
+                      {item.note && (
+                        <p className="text-[10px] text-slate-500 italic mt-1">{item.note}</p>
+                      )}
                     </div>
                   );
                 })

@@ -128,20 +128,26 @@ export type AlertCategory =
 export interface AlertEvidence {
   snapshotUrl: string;
   videoClipUrl?: string;
+  videoClipPublicId?: string;
+  startTimestamp?: number;
+  endTimestamp?: number;
+  duration?: number;
+  eventTimestamp?: string;
   timestamp: string;
-  cameraId: string;
-  cameraName: string;
+  cameraId?: string;
+  cameraName?: string;
   detectedCount: number;
   expectedCount: number;
   confidence: number;
   modelVersion: string;
-  detectionMetadata: {
-    people: number;
-    computers: number;
-    machines: number;
-    workbenches: number;
-    chairs: number;
-    damaged: number;
+  detectionMetadata?: {
+    people?: number;
+    computers?: number;
+    machines?: number;
+    workbenches?: number;
+    chairs?: number;
+    benches?: number;
+    damaged?: number;
   };
 }
 
@@ -149,6 +155,15 @@ export interface ComplianceAlert {
   id: string;
   centreId: string;
   centreName: string;
+  submissionId?: string;
+  assetType?: string;
+  approvedCount?: number;
+  detectedCount?: number;
+  difference?: number;
+  eventTimestamp?: string;
+  aiAnalysisId?: string;
+  evidenceClipUrl?: string;
+  evidenceClipPublicId?: string;
   category: AlertCategory;
   severity: AlertSeverity;
   detectedTime: string;
@@ -157,7 +172,7 @@ export interface ComplianceAlert {
   aiConfidence: number;
   observedValue?: number | string;
   expectedValue?: number | string;
-  status: 'NEW' | 'CONFIRMED' | 'FALSE_POSITIVE' | 'ACTION_CREATED' | 'RESOLVED';
+  status: 'NEW' | 'CONFIRMED' | 'FALSE_POSITIVE' | 'ACTION_CREATED' | 'RESOLVED' | 'DISMISSED';
   evidence: AlertEvidence;
   actionId?: string;
   officerRemarks?: string;

@@ -248,8 +248,32 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
                     <span className="font-semibold text-slate-700">{alert.centreName}</span>
                     <span>•</span>
                     <span>
-                      Observed: <strong className="text-rose-600">{alert.evidence.detectedCount}</strong> / Expected: {alert.evidence.expectedCount}
+                      Observed: <strong className="text-rose-600">{alert.detectedCount ?? alert.evidence.detectedCount}</strong> / Expected: {alert.approvedCount ?? alert.evidence.expectedCount}
                     </span>
+                    {alert.difference !== undefined && (
+                      <>
+                        <span>•</span>
+                        <span className="font-semibold text-rose-600">
+                          Discrepancy: {alert.difference}
+                        </span>
+                      </>
+                    )}
+                    {alert.assetType && (
+                      <>
+                        <span>•</span>
+                        <span className="bg-slate-100 font-medium px-1.5 py-0.5 rounded text-[10px]">
+                          Asset: {alert.assetType}
+                        </span>
+                      </>
+                    )}
+                    {(alert.evidenceClipUrl || alert.evidence.videoClipUrl) && (
+                      <>
+                        <span>•</span>
+                        <span className="bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded text-[10px] border border-indigo-200">
+                          Evidence Clip Available
+                        </span>
+                      </>
+                    )}
                     <span>•</span>
                     <span>AI Confidence: {(alert.aiConfidence * 100).toFixed(1)}%</span>
                   </div>
@@ -263,22 +287,36 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
                   className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold rounded-lg transition-colors flex items-center space-x-1"
                 >
                   <Eye className="w-3.5 h-3.5" />
-                  <span>Inspect Evidence</span>
+                  <span>Inspect Evidence Clip</span>
                 </button>
 
                 {alert.status === 'NEW' && (
                   <>
                     <button
-                      onClick={() => appState.updateAlertStatus(alert.id, 'CONFIRMED', 'Confirmed by Officer')}
+                      onClick={async () => {
+                        try {
+                          await api.resolveAlert(alert.id, 'Confirmed by Officer');
+                          setAlerts((prev) => prev.map((a) => a.id === alert.id ? { ...a, status: 'CONFIRMED' } : a));
+                        } catch (e) {
+                          setAlerts((prev) => prev.map((a) => a.id === alert.id ? { ...a, status: 'CONFIRMED' } : a));
+                        }
+                      }}
                       className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
                       title="Confirm Issue"
                     >
                       <CheckCircle className="w-4 h-4 text-emerald-600" />
                     </button>
                     <button
-                      onClick={() => appState.updateAlertStatus(alert.id, 'FALSE_POSITIVE', 'Marked false detection')}
+                      onClick={async () => {
+                        try {
+                          await api.dismissAlert(alert.id, 'Dismissed by Officer');
+                          setAlerts((prev) => prev.map((a) => a.id === alert.id ? { ...a, status: 'DISMISSED' } : a));
+                        } catch (e) {
+                          setAlerts((prev) => prev.map((a) => a.id === alert.id ? { ...a, status: 'DISMISSED' } : a));
+                        }
+                      }}
                       className="p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors"
-                      title="Mark False Positive"
+                      title="Mark False Positive / Dismiss"
                     >
                       <XCircle className="w-4 h-4 text-rose-600" />
                     </button>
@@ -287,13 +325,13 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
 
                 <span
                   className={`text-[10px] font-bold px-2 py-1 rounded ${
-                    alert.status === 'RESOLVED'
+                    alert.status === 'RESOLVED' || alert.status === 'CONFIRMED'
                       ? 'bg-emerald-100 text-emerald-800'
                       : alert.status === 'ACTION_CREATED'
                       ? 'bg-indigo-100 text-indigo-800'
-                      : alert.status === 'CONFIRMED'
-                      ? 'bg-amber-100 text-amber-800'
-                      : 'bg-slate-100 text-slate-700'
+                      : alert.status === 'DISMISSED' || alert.status === 'FALSE_POSITIVE'
+                      ? 'bg-slate-200 text-slate-700'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200'
                   }`}
                 >
                   {alert.status.replace('_', ' ')}
@@ -311,6 +349,9 @@ export const AlertsView: React.FC<AlertsViewProps> = ({ onNavigateToActions }) =
           alert={selectedAlert}
           onClose={() => setSelectedAlert(null)}
           onActionCreated={onNavigateToActions}
+          onAlertUpdated={(alertId, newStatus) => {
+            setAlerts((prev) => prev.map((a) => a.id === alertId ? { ...a, status: newStatus as any } : a));
+          }}
         />
       )}
     </div>

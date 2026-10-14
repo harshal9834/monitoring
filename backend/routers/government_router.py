@@ -291,24 +291,47 @@ def get_alerts(
     results = []
     for a in alerts:
         centre = db.query(TrainingCentre).filter(TrainingCentre.id == a.centre_id).first()
+        clip_url = a.evidence_clip_url or (a.evidence.video_clip_url if a.evidence else None)
+        clip_public_id = a.evidence_clip_public_id or (a.evidence.video_clip_public_id if a.evidence else None)
         results.append({
             "id": a.id,
             "centreId": a.centre_id,
+            "center_id": a.centre_id,
             "centreName": centre.name if centre else "Accredited Centre",
+            "submissionId": a.submission_id,
+            "assetType": a.asset_type,
+            "approvedCount": a.approved_count if a.approved_count is not None else a.submitted_value,
+            "detectedCount": a.detected_count if a.detected_count is not None else a.ai_value,
+            "difference": a.difference if a.difference is not None else -a.variance,
+            "eventTimestamp": a.event_timestamp or a.detected_time,
+            "aiAnalysisId": a.ai_analysis_id,
+            "evidenceClipUrl": clip_url,
+            "evidenceClipPublicId": clip_public_id,
             "category": a.category,
             "severity": a.severity,
             "title": a.title,
             "description": a.description,
-            "detectedTime": a.detected_time or "10:00 AM",
+            "detectedTime": a.event_timestamp or a.detected_time or "10:00 AM",
             "aiConfidence": a.ai_confidence,
             "status": a.status,
-            "submittedValue": a.submitted_value,
-            "aiValue": a.ai_value,
+            "submittedValue": a.approved_count if a.approved_count is not None else a.submitted_value,
+            "aiValue": a.detected_count if a.detected_count is not None else a.ai_value,
             "variance": a.variance,
+            "startTimestamp": a.evidence.start_timestamp if a.evidence else None,
+            "endTimestamp": a.evidence.end_timestamp if a.evidence else None,
+            "startTime": a.evidence.start_timestamp if a.evidence else None,
+            "endTime": a.evidence.end_timestamp if a.evidence else None,
+            "duration": a.evidence.duration if a.evidence else 4.0,
             "evidence": {
-                "snapshotUrl": a.evidence.snapshot_url if a.evidence else "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80",
-                "detectedCount": a.ai_value,
-                "expectedCount": a.submitted_value,
+                "snapshotUrl": (a.evidence.snapshot_url if a.evidence else None) or clip_url or "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80",
+                "videoClipUrl": clip_url,
+                "videoClipPublicId": clip_public_id,
+                "startTimestamp": a.evidence.start_timestamp if a.evidence else None,
+                "endTimestamp": a.evidence.end_timestamp if a.evidence else None,
+                "duration": a.evidence.duration if a.evidence else 4.0,
+                "eventTimestamp": a.event_timestamp or a.detected_time,
+                "detectedCount": a.detected_count if a.detected_count is not None else a.ai_value,
+                "expectedCount": a.approved_count if a.approved_count is not None else a.submitted_value,
                 "confidence": a.ai_confidence,
                 "modelVersion": a.evidence.model_version if a.evidence else "v1.4.0",
                 "timestamp": a.created_at.isoformat()
@@ -689,7 +712,15 @@ def run_ai_analysis_background(submission_id: str, centre_id: str):
 
             if video_local_path and os.path.exists(video_local_path):
                 # Sample up to 12 frames at 1 fps for optimal CPU latency on cloud container
-                video_analysis_data = process_video_pipeline(video_local_path, sub.centre_id, db, sample_fps=1, max_sampled_frames=12)
+                video_analysis_data = process_video_pipeline(
+                    video_path=video_local_path,
+                    centre_id=sub.centre_id,
+                    db=db,
+                    sample_fps=1,
+                    max_sampled_frames=12,
+                    submission_id=sub.id,
+                    ai_analysis_id=job.id if job else None
+                )
                 if job:
                     job.analysis_results = video_analysis_data
                     job.progress_percentage = 80

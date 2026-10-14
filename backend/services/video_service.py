@@ -54,7 +54,15 @@ def get_system_thresholds(db: Session):
         "default_fps": default_fps
     }
 
-def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_fps: int = None, max_sampled_frames: int = 40) -> dict:
+def process_video_pipeline(
+    video_path: str,
+    centre_id: str,
+    db: Session,
+    sample_fps: int = None,
+    max_sampled_frames: int = 40,
+    submission_id: str = None,
+    ai_analysis_id: str = None
+) -> dict:
     thresholds = get_system_thresholds(db)
     fps_to_use = sample_fps or thresholds["default_fps"]
 
@@ -231,26 +239,25 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
 
     infra_comparison = []
 
-    # Map YOLO class names to approved asset types
-    yolo_to_asset_mapping = {
-        "laptop": "computers",
-        "tv": "computers",
-        "monitor": "computers",
-        "chair": "chairs",
-        "bench": "workbenches",
-        "dining table": "workbenches",
-        "table": "workbenches",
-        "cctv": "cctv",
-    }
+    # Map YOLO class names to approved asset types dynamically
+    approved_keys_list = [apr.asset_type_id for apr in approved_records]
+
+    from backend.services.infra_detection_service import map_object_class_to_asset_key
 
     # Compute detected quantities for approved assets dynamically
+    # Use max count across all sampled frames or video-wide peak
     approved_detected_counts = {}
-    for yolo_cls, count in all_detected_objects.items():
-        if yolo_cls == "person":
-            continue
-        mapped_key = yolo_to_asset_mapping.get(yolo_cls)
-        if mapped_key:
-            approved_detected_counts[mapped_key] = approved_detected_counts.get(mapped_key, 0) + count
+    for f_ev in frame_events:
+        f_counts = {}
+        for d in f_ev.get("detections", []):
+            c_name = d.get("class", "").lower()
+            if c_name == "person":
+                continue
+            mapped_k = map_object_class_to_asset_key(c_name, approved_keys_list)
+            if mapped_k:
+                f_counts[mapped_k] = f_counts.get(mapped_k, 0) + 1
+        for k_item, cnt_item in f_counts.items():
+            approved_detected_counts[k_item] = max(approved_detected_counts.get(k_item, 0), cnt_item)
 
     # Submissions reported infra
     reported_infra = (last_sub.infrastructure_reported if (last_sub and last_sub.infrastructure_reported) else {}) or {}
@@ -263,19 +270,26 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
         reported_qty = reported_infra.get(asset_id, approved_qty)
         detected_qty = approved_detected_counts.get(asset_id, 0)
 
-        # Baseline detection heuristic if benches/chairs are present in classroom
-        if asset_id == "chairs" and detected_qty == 0 and ("chair" in all_detected_objects or "bench" in all_detected_objects):
-            detected_qty = max(all_detected_objects.get("chair", 0), all_detected_objects.get("bench", 0))
-        elif asset_id == "workbenches" and detected_qty == 0 and "bench" in all_detected_objects:
+        # Baseline detection heuristic if benches/chairs/workbenches are present in classroom
+        if asset_id == "chairs" and detected_qty == 0 and "chair" in all_detected_objects:
+            detected_qty = all_detected_objects.get("chair", 0)
+        elif asset_id == "benches" and detected_qty == 0 and "bench" in all_detected_objects:
             detected_qty = all_detected_objects.get("bench", 0)
+        elif asset_id == "workbenches" and detected_qty == 0 and ("workbench" in all_detected_objects or "bench" in all_detected_objects):
+            detected_qty = all_detected_objects.get("workbench", all_detected_objects.get("bench", 0))
 
         diff = max(0, approved_qty - detected_qty)
-        if diff == 0:
-            status = "Verified Present"
-        elif diff <= 2:
-            status = "Requires Verification"
+        if detected_qty > 0:
+            if diff == 0:
+                status = "Verified Present"
+            elif diff <= 2:
+                status = "Requires Verification"
+            else:
+                status = "Under-Counted / Shortage"
+            note = f"AI Observed: {detected_qty} units cross-referenced against approved registration baseline ({approved_qty})."
         else:
-            status = "Under-Counted / Shortage"
+            status = "Detection Unavailable"
+            note = "Detection unavailable for this asset class or objects not within camera field of view."
 
         infra_comparison.append({
             "assetKey": asset_id,
@@ -286,7 +300,7 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
             "detectedQuantity": detected_qty,
             "difference": diff,
             "status": status,
-            "note": "AI visual detection cross-referenced against approved registration baseline."
+            "note": note
         })
 
     # Extra / Unregistered Objects detected in the video that are NOT part of approved assets
@@ -294,7 +308,7 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
     for yolo_cls, count in all_detected_objects.items():
         if yolo_cls == "person":
             continue
-        mapped = yolo_to_asset_mapping.get(yolo_cls)
+        mapped = map_object_class_to_asset_key(yolo_cls, approved_keys_list)
         if not mapped or mapped not in handled_asset_keys:
             extra_objects.append({
                 "className": yolo_cls.title(),
@@ -315,7 +329,32 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
             "severity": "CRITICAL" if variance_pct > thresholds["critical_threshold"] else "WARNING"
         })
 
-    timeline_events.sort(key=lambda x: x["timestamp"])
+    # -------------------------------------------------------------
+    # Infrastructure Movement / Asset Count Reduction Detection
+    # -------------------------------------------------------------
+    infra_alerts_created = []
+    try:
+        from backend.services.infra_detection_service import process_infrastructure_movement_alerts
+        infra_alerts_created = process_infrastructure_movement_alerts(
+            video_source_path=video_path,
+            center_id=centre_id,
+            submission_id=submission_id or f"sub_{int(datetime.utcnow().timestamp())}",
+            ai_analysis_id=ai_analysis_id or f"ai_an_{uuid.uuid4().hex[:8]}",
+            frame_events=frame_events,
+            db=db
+        )
+        if infra_alerts_created:
+            for al in infra_alerts_created:
+                timeline_events.append({
+                    "timestamp": round(duration_sec * 0.5, 2),
+                    "timeFormatted": al.get("event_timestamp", "00:00"),
+                    "type": "INFRASTRUCTURE_REDUCTION",
+                    "description": f"Potential Infrastructure Count Reduction — Review Required: {al.get('asset_type', '').title()} (Discrepancy: {al.get('difference')})",
+                    "count": al.get("detected_count", 0),
+                    "severity": "CRITICAL" if abs(al.get("difference", 0)) >= 3 else "HIGH"
+                })
+    except Exception as e:
+        print(f"[Warning] Infrastructure movement detection error: {e}")
 
     analysis_data = {
         "duration_seconds": round(duration_sec, 2),
@@ -339,6 +378,7 @@ def process_video_pipeline(video_path: str, centre_id: str, db: Session, sample_
             "critical_threshold": thresholds["critical_threshold"]
         },
         "infrastructure_comparison": infra_comparison,
+        "infrastructure_alerts": infra_alerts_created,
         "timeline_events": timeline_events,
         "frame_events": frame_events
     }

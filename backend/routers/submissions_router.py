@@ -13,7 +13,8 @@ from sqlalchemy import func
 from backend.database import get_db
 from backend.models.models import (
     AttendanceSubmission, AttendanceAIResult, Video, VideoJob,
-    TrainingCentre, CentreBatch, User, AuditLog, CentreUser, SubmissionMedia
+    TrainingCentre, CentreBatch, User, AuditLog, CentreUser, SubmissionMedia,
+    Alert, AlertEvidence
 )
 from backend.schemas.schemas import DeletionRequest
 from backend.services.auth_service import get_current_user, require_roles
@@ -196,11 +197,12 @@ async def create_submission(
             video_duration_sec = float(cloud_res.get("duration") or 0.0)
             print(f"[SUBMISSION] Cloudinary upload successful: {video_public_id}", flush=True)
 
-            # If duration is 0, probe from temporary memory file
+            # Prepare temporary memory-backed file for immediate AI inference
+            fd, temp_video_path = tempfile.mkstemp(suffix=ext)
+            with os.fdopen(fd, "wb") as f_tmp:
+                f_tmp.write(video_bytes)
+
             if video_duration_sec <= 0.0:
-                fd, temp_video_path = tempfile.mkstemp(suffix=ext)
-                with os.fdopen(fd, "wb") as f_tmp:
-                    f_tmp.write(video_bytes)
                 try:
                     cap = cv2.VideoCapture(temp_video_path)
                     if cap.isOpened():
@@ -385,7 +387,13 @@ async def create_submission(
         if video_rec and temp_video_path and os.path.exists(temp_video_path):
             try:
                 from backend.services.video_service import process_video_pipeline
-                analysis_data = process_video_pipeline(temp_video_path, resolved_centre_id, db)
+                analysis_data = process_video_pipeline(
+                    video_path=temp_video_path,
+                    centre_id=resolved_centre_id,
+                    db=db,
+                    submission_id=sub_id,
+                    ai_analysis_id=job.id
+                )
                 est = analysis_data.get("estimated_presence", pres)
                 variance = max(0, pres - est)
                 variance_pct = round((variance / max(pres, 1)) * 100, 1)
@@ -415,6 +423,46 @@ async def create_submission(
 
                 if variance_pct >= 10.0:
                     sub.status = "DISCREPANCY_CRITICAL"
+                    existing_alert = db.query(Alert).filter(
+                        Alert.centre_id == resolved_centre_id,
+                        Alert.submission_id == sub_id,
+                        Alert.category == "ATTENDANCE_MISMATCH",
+                        Alert.is_deleted == False
+                    ).first()
+                    if not existing_alert:
+                        alert_id = f"alt_att_{int(datetime.utcnow().timestamp())}_{sub_id[-4:]}"
+                        new_alert = Alert(
+                            id=alert_id,
+                            centre_id=resolved_centre_id,
+                            submission_id=sub_id,
+                            video_id=video_rec.id if video_rec else None,
+                            category="ATTENDANCE_MISMATCH",
+                            severity="CRITICAL",
+                            title=f"Attendance Variance ({est} Detected vs {pres} Claimed)",
+                            description=f"YOLO vision pipeline detected {est} trainees in submitted classroom media vs {pres} reported on daily roster (Variance: {variance_pct}%).",
+                            detected_time=datetime.utcnow().strftime("%I:%M %p"),
+                            ai_confidence=0.94,
+                            submitted_value=pres,
+                            ai_value=est,
+                            variance=variance,
+                            status="NEW",
+                            is_deleted=False,
+                            created_at=datetime.utcnow()
+                        )
+                        db.add(new_alert)
+                        db.add(AlertEvidence(
+                            alert_id=alert_id,
+                            snapshot_url=video_secure_url or "/static/videos/classroom_sample.mp4",
+                            video_clip_url=video_secure_url,
+                            detected_count=est,
+                            expected_count=pres,
+                            confidence=0.94,
+                            model_version="v1.4.0",
+                            submission_id=sub_id,
+                            center_id=resolved_centre_id,
+                            timestamp=datetime.utcnow()
+                        ))
+                        print(f"[ATTENDANCE ALERT CREATE] Created alert {alert_id} for submission {sub_id}", flush=True)
             except Exception as e:
                 print(f"[Warning] Immediate video pipeline execution skipped: {e}")
                 job.status = "PENDING"

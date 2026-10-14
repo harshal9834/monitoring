@@ -500,6 +500,17 @@ class Alert(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     resolved_at = Column(DateTime, nullable=True)
 
+    # Infrastructure Movement / Asset Count Reduction Detection attributes
+    submission_id = Column(String(50), nullable=True, index=True)
+    asset_type = Column(String(100), nullable=True)
+    approved_count = Column(Integer, nullable=True)
+    detected_count = Column(Integer, nullable=True)
+    difference = Column(Integer, nullable=True)
+    event_timestamp = Column(String(50), nullable=True)
+    ai_analysis_id = Column(String(100), nullable=True)
+    evidence_clip_url = Column(String(500), nullable=True)
+    evidence_clip_public_id = Column(String(255), nullable=True)
+
     centre = relationship("TrainingCentre", back_populates="alerts")
     evidence = relationship("AlertEvidence", back_populates="alert", uselist=False)
     actions = relationship("Action", back_populates="alert")
@@ -516,6 +527,17 @@ class AlertEvidence(Base):
     expected_count = Column(Integer, default=0)
     confidence = Column(Float, default=0.94)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    
+    # Evidence clip fields
+    video_clip_url = Column(String(500), nullable=True)
+    video_clip_public_id = Column(String(255), nullable=True)
+    start_timestamp = Column(Float, nullable=True)
+    end_timestamp = Column(Float, nullable=True)
+    duration = Column(Float, nullable=True)
+    resource_type = Column(String(50), default="video")
+    event_timestamp = Column(String(50), nullable=True)
+    submission_id = Column(String(50), nullable=True)
+    center_id = Column(String(50), nullable=True)
 
     alert = relationship("Alert", back_populates="evidence")
 

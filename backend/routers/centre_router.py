@@ -724,24 +724,37 @@ def get_centre_alerts(
     results = []
     centre = db.query(TrainingCentre).filter(TrainingCentre.id == centre_id).first()
     for a in alerts:
+        clip_url = a.evidence_clip_url or (a.evidence.video_clip_url if a.evidence else None)
+        clip_public_id = a.evidence_clip_public_id or (a.evidence.video_clip_public_id if a.evidence else None)
         results.append({
             "id": a.id,
             "centreId": a.centre_id,
             "centreName": centre.name if centre else "My Centre",
+            "submissionId": a.submission_id,
+            "assetType": a.asset_type,
+            "approvedCount": a.approved_count if a.approved_count is not None else a.submitted_value,
+            "detectedCount": a.detected_count if a.detected_count is not None else a.ai_value,
+            "difference": a.difference if a.difference is not None else -a.variance,
+            "eventTimestamp": a.event_timestamp or a.detected_time,
+            "aiAnalysisId": a.ai_analysis_id,
+            "evidenceClipUrl": clip_url,
+            "evidenceClipPublicId": clip_public_id,
             "category": a.category,
             "severity": a.severity,
             "title": a.title,
             "description": a.description,
-            "detectedTime": a.detected_time or "10:00 AM",
+            "detectedTime": a.event_timestamp or a.detected_time or "10:00 AM",
             "aiConfidence": a.ai_confidence,
             "status": a.status,
-            "submittedValue": a.submitted_value,
-            "aiValue": a.ai_value,
+            "submittedValue": a.approved_count if a.approved_count is not None else a.submitted_value,
+            "aiValue": a.detected_count if a.detected_count is not None else a.ai_value,
             "variance": a.variance,
             "evidence": {
-                "snapshotUrl": a.evidence.snapshot_url if a.evidence else "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80",
-                "detectedCount": a.ai_value,
-                "expectedCount": a.submitted_value,
+                "snapshotUrl": (a.evidence.snapshot_url if a.evidence else None) or clip_url or "https://images.unsplash.com/photo-1524178232363-1fb2b075b655?auto=format&fit=crop&w=1200&q=80",
+                "videoClipUrl": clip_url,
+                "videoClipPublicId": clip_public_id,
+                "detectedCount": a.detected_count if a.detected_count is not None else a.ai_value,
+                "expectedCount": a.approved_count if a.approved_count is not None else a.submitted_value,
                 "confidence": a.ai_confidence,
                 "modelVersion": a.evidence.model_version if a.evidence else "v1.4.0",
                 "timestamp": a.created_at.isoformat()

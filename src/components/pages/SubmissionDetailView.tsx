@@ -148,7 +148,10 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
       if (res.status === 'COMPLETED') {
         if (analysisTimerRef.current) clearInterval(analysisTimerRef.current);
         setAnalysisProgress(100);
-        setAnalysisMessage('AI Inference Completed! Opening visual analysis review...');
+        // Dispatch refresh events so Government Alerts and Sidebar badge update immediately without page reload
+        window.dispatchEvent(new CustomEvent('skillguard:refresh-stats'));
+        window.dispatchEvent(new CustomEvent('skillguard:ai-analysis-completed', { detail: { submissionId } }));
+
         if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
         redirectTimerRef.current = setTimeout(() => {
           setIsAnalyzing(false);
@@ -169,6 +172,11 @@ export const SubmissionDetailView: React.FC<SubmissionDetailViewProps> = ({
             setAnalysisProgress(100);
             setAnalysisMessage('AI Analysis Complete! Opening visual analysis review...');
             setDetail(updatedDetail);
+
+            // Dispatch refresh events so Government Alerts and Sidebar badge update immediately without page reload
+            window.dispatchEvent(new CustomEvent('skillguard:refresh-stats'));
+            window.dispatchEvent(new CustomEvent('skillguard:ai-analysis-completed', { detail: { submissionId } }));
+
             if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
             redirectTimerRef.current = setTimeout(() => {
               setIsAnalyzing(false);
